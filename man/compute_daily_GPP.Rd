@@ -4,7 +4,7 @@
 \alias{compute_daily_GPP}
 \title{sum GPP by day of year}
 \usage{
-compute_daily_GPP(GPP, timestamp, doy = as.POSIXlt(timestamp)$yday)
+compute_daily_GPP(GPP, timestamp)
 }
 \arguments{
 \item{GPP}{numeric vector to be summed}

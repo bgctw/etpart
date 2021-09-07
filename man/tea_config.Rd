@@ -4,8 +4,15 @@
 \alias{tea_config}
 \title{configure hyperparameters of the TEA algorithm}
 \usage{
-tea_config(CSWIlimit = -0.5, perc = c(0.75), smax = 5,
-  GPPlimit = 0.05, GPPdaylimit = 0.5, Tairlimit = 5, Rglimit = 0)
+tea_config(
+  CSWIlimit = -0.5,
+  perc = c(0.75),
+  smax = 5,
+  GPPlimit = 0.05,
+  GPPdaylimit = 0.5,
+  Tairlimit = 5,
+  Rglimit = 0
+)
 }
 \arguments{
 \item{CSWIlimit}{filter for conservative surface

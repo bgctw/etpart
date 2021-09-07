@@ -15,6 +15,7 @@ df <- data.frame(
   ,GPP = pmax(0,.dsin)
   ,precip = isprecip * 5*rlnorm(48*nday)
   ,ET = 1/24*pmax(0,.dsin)
+  ,Rg = 200 * pmax(0,.dsin)
 )
 
 .tmp.f <- function() {
@@ -47,6 +48,35 @@ test_that("compute_cswi", {
     plot(cswi ~ timestamp, df2)
   }
 })
+
+test_that("compute_diurnal_centroid", {
+  #increase ET at 10:00am at second day
+  # so that dci is shifted towards morning for second day
+  df2 <- df; df2$ET[48+2*10] <- 2*df2$ET[48+2*10]
+  dci = compute_diurnal_centroid(df2$ET)
+  expect_equal(length(dci), nday)
+  expect_equal(dci[1], 12)
+  expect_true(dci[2] < 12)
+  #
+  ndci <- compute_norm_diurnal_centroid(df2$ET, df2$Rg)
+  expect_equal(ndci[1], 0)
+  expect_equal(ndci[2], dci[2] - 12)
+})
+
+test_that("daily_correlation", {
+  #increase ET at 10:00am at second day
+  # so that dci is shifted towards morning for second day
+  df2 <- df; df2$ET[48+2*10] <- 2*df2$ET[48+2*10]
+  dci = ETPart:::daily_corr(df2$ET, df2$GPP, df2$Rg)
+  expect_equal(length(dci), nday)
+  expect_equal(dci[1], 1.0)
+  expect_true(dci[2] < 1.0)
+})
+
+test_that("compute_DWCI", {
+  tmp <- compute_DWCI(DETha)
+})
+
 
 
 

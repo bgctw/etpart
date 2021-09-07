@@ -137,6 +137,205 @@ compute_daily_GPP <- function(GPP, timestamp) {
   GPPday <- rep(GPPday0, times = ndoy )
 }
 
+#' Normalized diurnal centroid of latent energy (LE)
+#'
+#' Calculates the diurnal centroid of LE relative to the diurnal centroid of
+#' incoming radiation (Rg).
+#'
+#' @param flux numeric vector of sub-daily flux (usuall LE)
+#'   that must be condinuous and regular
+#' @param Rg incoming radiation, can be any unit
+#' @param units_per_day integer: frequency of the sub-daily measurements,
+#'    48 for half hourly measurements
+#'
+#' @return The normalized diurnal centroid, in hours,
+#'  at a daily frequency
+#' @export
+compute_norm_diurnal_centroid <- function(flux, Rg, units_per_day = 48){
+  C_LE = compute_diurnal_centroid(flux, units_per_day=units_per_day)
+  C_Rg = compute_diurnal_centroid(Rg, units_per_day=units_per_day)
+  C_LE - C_Rg
+}
+
+#' Diurnal centroid of sub-daily fluxes
+#'
+#' Calculates the daily flux weighted time of a sub-daily flux.
+#'
+#' @param flux numeric vector of sub-daily flux that must be continuous
+#'    and regular of full days
+#' @param units_per_day integer: frequency of the sub-daily measurements,
+#'    48 for half hourly measurements
+#'
+#' @return The diurnal centroid, in hours at a daily frequency
+#' @export
+compute_diurnal_centroid <- function(flux, units_per_day = 48) {
+  nday = length(flux) / units_per_day
+  fluxm <- matrix(flux, nrow = units_per_day)
+  hour = (1:units_per_day)/units_per_day*24
+  dci <- apply(fluxm, 2, function(x){
+    sum(x*hour)/sum(x)
+  })
+  # calculate the total number of days
+  # days,UPD=flux.reshape(-1,UnitsPerDay).shape
+  # # create a 2D matrix providing a UPD time series for each day, used in the
+  # matrix operations.
+  # hours=np.tile(np.arange(UPD),days).reshape(days,UPD)
+  # # calculate the diurnal centroid
+  # C=np.sum(hours*flux.reshape(-1,48),axis=1)/np.sum(flux.reshape(-1,48),axis=1)
+  # C=C*(24/UnitsPerDay)
+  # return(C)
+}
+
+
+#' Diurnal water:carbon index (DWCI)
+#'
+#' DWCI measures the probability that the carbon and water are coupled
+#' within a given day. Method takes the correlation between
+#' evapotranspiration (LE) and gross primary productivity (GPP) and
+#' calculates the correlation within each day. This correlation is then
+#' compared to a distribution of correlations between artificial datasets
+#' built from the signal of potential radiation and the uncertainty in
+#' the LE and GPP.
+#'
+#' @param data data.frame of sub-daily timeseries with variables
+#' \describe{
+#' \item{Rg_pot}{Potential radiation}
+#' \item{ET}{evapotranspiration or latent energy}
+#' \item{GPP}{ross primary productivity}
+#' \item{VPD}{vapor pressure deficit}
+#' \item{NEE}{net ecosystem exchange}
+#' \item{ET_sd}{estimation of the uncertainty of ET}
+#' \item{GPP_sd}{eestimation of the uncertainty of GPP}
+#' \item{NEE_fall}{ Modeled net ecosystem exchange i.e. no noise}
+#' \item{ET_fall}{Modeled evapotranspiration or latent energy i.e. no noise}
+#' }
+#' @param units_per_day integer: frequency of the sub-daily measurements,
+#'    48 for half hourly measurements'
+#'
+#' @return The diurnal water:carbon index (DWCI)
+#' @export
+compute_DWCI <- function(data, units_per_day = 48) {
+  nrep = 100 # the number of artificial datasets to construct
+  nday = nrow(data) / units_per_day
+  #   # creates an empty 2D dataset to hold the artificial distributions
+  #   StN=np.zeros([repeats,days])*np.nan
+  #   corrDev=np.zeros([days,2,2])
+  #
+  dfg <- data %>%
+    mutate(iday = rep(1:nday, each = units_per_day)) %>%
+    group_by(iday) %>%
+    mutate(
+      #   # create the daily cycle by dividing Rg_pot by the daily mean
+      #   daily_cycle=Rg_pot/Rg_pot.mean(axis=1)[:,None]
+      daily_cycle = Rg_pot/mean(Rg_pot, na.rm = FALSE),
+      # Isolate the error of the carbon and water fluxes.
+      NEE_err=NEE_fall-NEE,
+      ET_err=ET_fall-ET
+    )
+  dfday <- dfg %>%
+    summarise(
+      mean_GPP = mean(GPP),
+      mean_ET = mean(ET),
+      corrDev = ifelse(
+        is.na(mean_GPP) | is.na(mean_ET) |
+          any(is.na(NEE_err)) | any(is.na(ET_err)) |
+          any(is.na(GPP_sd)) | any(is.na(ET_sd))
+        ,NA,
+        ifelse(all(NEE_err == 0) | all(ET_err == 0), 1.0, cor(-NEE_err, ET_err)))
+    )
+  #   # loops through each day to generate an artificial dataset and calculate the associate correlation
+  #   for d in range(days):#days
+  #     if np.isnan(mean_GPP[d]) or np.isnan(mean_ET[d]):
+  #     continue
+  #   if np.isnan(NEE_err[d]).sum()>0 or np.isnan(ET_err[d]).sum()>0 or np.isnan(GPP_sd[d]).sum()>0 or np.isnan(ET_sd[d]).sum()>0:
+  #     continue
+  #   # find the correlation structure of the uncertanties to pass onto the artificial datasets
+  #   if np.all(ET_err[d]==0) or np.all(NEE_err[d]==0):
+  #     corrDev[d]=np.identity(2)
+  #   else:
+  #     corrDev[d] = np.corrcoef(-(NEE_err[d]),ET_err[d])
+  #
+  #   # create our synthetic GPP and ET values for the current day
+  #   synGPP  = np.zeros((repeats,48))*np.nan
+  #   synET   = np.zeros((repeats,48))*np.nan
+  #
+  #   # this loop builds the artificial dataset using the covariance matrix between NEE and ET
+  #   for i in range(48):
+  #     # compute the covariance matrix (s) for this half hour
+  #     m   = [GPP_sd[d,i],ET_sd[d,i]]
+  #   s   = np.zeros((2,2))*np.nan
+  #   for j in range(2):
+  #     for k in range(2):
+  #     s[j,k]    = corrDev[d,j,k]*m[j]*m[k]
+  #
+  #   Noise    = np.random.multivariate_normal([0,0],s,100) # generate random 100 values with the std of this half hour and the correlation between ET and GPP
+  #   synGPP[:,i] = daily_cycle[d,i]*mean_GPP[d]+Noise[:,0]    # synthetic gpp
+  #   synET[:,i]  = daily_cycle[d,i]*mean_ET[d]+Noise[:,1]     # synthetic le
+  #
+  #   # calculate the 100 artificial correlation coefficients for the day
+  #   StN[:,d]=daily_corr(synGPP, synET, np.tile(daily_cycle[d],100).reshape(-1,48))
+  #
+  #   # calculate the real correlation array
+  #   pwc=daily_corr(ET,GPP*np.sqrt(VPD),Rg_pot)
+  #
+  #   # calculate the rank of the real array within the artificial dataset giving DWCI
+  #   DWCI=(StN<np.tile(pwc,repeats).reshape(repeats,-1)).sum(axis=0)
+  #   DWCI[np.isnan(StN).prod(axis=0).astype(bool)]=-9999
+  #
+  #   return(DWCI)
+}
+
+#' Daily correlation coefficient
+#'
+#' Calculates a daily correlation coefficient between two sub-daily timeseries
+#' \code{x} and \code{y} considering only daytime, i.e. \code{Rg > 0}.
+#' Vectors \code{x}, \code{y}, and \code{Rg} must have the same length.
+#' Only complete cases, i.e. no NAs are considered.
+#'
+#' @param x
+#' @param y
+#' @param Rg_pot potential incoming radiation
+#' @param units_per_day integer: frequency of the sub-daily measurements,
+#'    48 for half hourly measurements#'
+#' @return correlation coefficents at daily timescale
+daily_corr <- function(x, y, Rg_pot, units_per_day = 48) {
+  nday = length(x) / units_per_day
+  dff <- data.frame(
+    x = x, y = y, Rg_pot = Rg_pot,
+    iday = rep(1:nday, each = units_per_day)
+  )
+  # corf <- function(x,y) {
+  #   # pearson product-moment correlation coefficient without na checking
+  #   mean( (x-mean(x))*(y-mean(y)) ) / (sd(x)*sd(y))
+  # }
+  ans <- dff %>%
+    filter(complete.cases(.)) %>%
+    filter(Rg_pot > 0) %>%
+    group_by(iday) %>%
+    summarise(
+      r2 = cor(x,y)^2
+    )
+  ans$r2
+  # x=x.reshape(-1,48)
+  # y=y.reshape(-1,48)
+  # Rg_pot=Rg_pot.reshape(-1,48)
+  # mask=Rg_pot<=0
+  # x=np.ma.MaskedArray(x,mask=mask)
+  # y=np.ma.MaskedArray(y,mask=mask)
+  # x=x/x.max(axis=1)[:,None]
+  # y=y/y.max(axis=1)[:,None]
+  # mx = x.mean(axis=1)
+  # my = y.mean(axis=1)
+  # xm, ym = x - mx[..., None], y - my[..., None]
+  # r_num = np.ma.add.reduce(xm * ym, axis=1)
+  # r_den = np.ma.sqrt(np.ma.sum(xm**2, axis=1) * np.ma.sum(ym**2, axis=1))
+  # r = r_num / r_den
+  # return(r**2)
+}
+
+
+
+
 
 
 
