@@ -10,14 +10,14 @@ compute_DWCI(data, units_per_day = 48)
 \item{data}{data.frame of sub-daily timeseries with variables
 \describe{
 \item{Rg_pot}{Potential radiation}
-\item{LE}{evapotranspiration or latent energy}
+\item{ET}{evapotranspiration or latent energy}
 \item{GPP}{ross primary productivity}
 \item{VPD}{vapor pressure deficit}
 \item{NEE}{net ecosystem exchange}
-\item{LE_sd}{estimation of the uncertainty of LE}
+\item{ET_sd}{estimation of the uncertainty of ET}
 \item{GPP_sd}{eestimation of the uncertainty of GPP}
 \item{NEE_fall}{ Modeled net ecosystem exchange i.e. no noise}
-\item{LE_fall}{Modeled evapotranspiration or latent energy i.e. no noise}
+\item{ET_fall}{Modeled evapotranspiration or latent energy i.e. no noise}
 }}
 
 \item{units_per_day}{integer: frequency of the sub-daily measurements,

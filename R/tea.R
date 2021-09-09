@@ -229,60 +229,83 @@ compute_DWCI <- function(data, units_per_day = 48) {
       #   daily_cycle=Rg_pot/Rg_pot.mean(axis=1)[:,None]
       daily_cycle = Rg_pot/mean(Rg_pot, na.rm = FALSE),
       # Isolate the error of the carbon and water fluxes.
-      NEE_err=NEE_fall-NEE,
-      ET_err=ET_fall-ET
-    )
+      NEE_err = NEE_fall - NEE,
+      ET_err = ET_fall - ET
+    ) %>%
+    nest()
   dfday <- dfg %>%
-    summarise(
-      mean_GPP = mean(GPP),
-      mean_ET = mean(ET),
-      corrDev = ifelse(
-        is.na(mean_GPP) | is.na(mean_ET) |
-          any(is.na(NEE_err)) | any(is.na(ET_err)) |
-          any(is.na(GPP_sd)) | any(is.na(ET_sd))
-        ,NA,
-        ifelse(all(NEE_err == 0) | all(ET_err == 0), 1.0, cor(-NEE_err, ET_err)))
-    )
-  #   # loops through each day to generate an artificial dataset and calculate the associate correlation
-  #   for d in range(days):#days
-  #     if np.isnan(mean_GPP[d]) or np.isnan(mean_ET[d]):
-  #     continue
-  #   if np.isnan(NEE_err[d]).sum()>0 or np.isnan(ET_err[d]).sum()>0 or np.isnan(GPP_sd[d]).sum()>0 or np.isnan(ET_sd[d]).sum()>0:
-  #     continue
-  #   # find the correlation structure of the uncertanties to pass onto the artificial datasets
-  #   if np.all(ET_err[d]==0) or np.all(NEE_err[d]==0):
-  #     corrDev[d]=np.identity(2)
-  #   else:
-  #     corrDev[d] = np.corrcoef(-(NEE_err[d]),ET_err[d])
-  #
-  #   # create our synthetic GPP and ET values for the current day
-  #   synGPP  = np.zeros((repeats,48))*np.nan
-  #   synET   = np.zeros((repeats,48))*np.nan
-  #
-  #   # this loop builds the artificial dataset using the covariance matrix between NEE and ET
-  #   for i in range(48):
-  #     # compute the covariance matrix (s) for this half hour
-  #     m   = [GPP_sd[d,i],ET_sd[d,i]]
-  #   s   = np.zeros((2,2))*np.nan
-  #   for j in range(2):
-  #     for k in range(2):
-  #     s[j,k]    = corrDev[d,j,k]*m[j]*m[k]
-  #
-  #   Noise    = np.random.multivariate_normal([0,0],s,100) # generate random 100 values with the std of this half hour and the correlation between ET and GPP
-  #   synGPP[:,i] = daily_cycle[d,i]*mean_GPP[d]+Noise[:,0]    # synthetic gpp
-  #   synET[:,i]  = daily_cycle[d,i]*mean_ET[d]+Noise[:,1]     # synthetic le
-  #
-  #   # calculate the 100 artificial correlation coefficients for the day
-  #   StN[:,d]=daily_corr(synGPP, synET, np.tile(daily_cycle[d],100).reshape(-1,48))
-  #
-  #   # calculate the real correlation array
-  #   pwc=daily_corr(ET,GPP*np.sqrt(VPD),Rg_pot)
-  #
-  #   # calculate the rank of the real array within the artificial dataset giving DWCI
-  #   DWCI=(StN<np.tile(pwc,repeats).reshape(repeats,-1)).sum(axis=0)
-  #   DWCI[np.isnan(StN).prod(axis=0).astype(bool)]=-9999
-  #
-  #   return(DWCI)
+    mutate(df_corr_syn = map(data, correlations_from_artificial)) %>%
+    unnest(cols = c(iday, df_corr_syn))
+  dfday$dwci
+}
+
+#' Compute Artificial correlations from daily data
+#'
+#' Correlation between ET and GPP is obscured by noise. The effect size
+#' depends on signal (flux) to noise (errors) ratio.
+#' This function bootstaps the correlation of two perfectly correlated signals
+#' with random noise added corresponding to errors in ET and NEE.
+#' and then gives the rank
+#'
+#' @param dfs tibble with columns GPP, ET, GPP_sd, ET_sd, NEE_err, ET_err
+#'
+#' @return data.frame by day with columns mean_GPP, mean_ET,
+#'   corr_err (pearson correlation coefficient between errors of ET and NEE),
+#'   corr_syn (vector of perason correlation coefficients between GPP and ET)
+#'   dwci (rank of observed correlation within artificial correlations in %)
+correlations_from_artificial <- function(dfs, nboot = 100){
+  mean_GPP = mean(dfs$GPP, na.rm = TRUE)
+  mean_ET = mean(dfs$ET, na.rm = TRUE)
+  daily_cylce = dfs$Rg_pot / mean(dfs$Rg_pot, na.rm = TRUE)
+  corr_err = ifelse(
+    !is.finite(mean_GPP) | !is.finite(mean_ET) |
+      any(is.na(dfs$NEE_err)) | any(is.na(dfs$ET_err)) |
+      any(is.na(dfs$GPP_sd)) | any(is.na(dfs$ET_sd))
+    #,NA_real_,
+    , 0.0 , # assume no correlation in errors
+    ifelse(all(dfs$NEE_err == 0) | all(dfs$ET_err == 0),
+           1.0, cor(-dfs$NEE_err, dfs$ET_err)))
+  # generate artificial GPP and ET daily vectors
+  GPP_syn <- ET_syn <- matrix(NA_real_, nrow = nrow(dfs), ncol = nboot)
+  if (corr_err == 0) {
+    for (irow in 1:nrow(dfs)) {
+      GPP_syn[irow,] <- daily_cylce[irow] * mean_GPP +
+        rnorm(nboot, dfs$GPP_sd[irow])
+      ET_syn[irow,] <- daily_cylce[irow] * mean_ET +
+        rnorm(nboot, dfs$ET_sd[irow])
+    }
+  } else {
+    corm = matrix(c(1, corr_err, corr_err, 1), nrow = 2)
+    for (irow in 1:nrow(dfs)) {
+      sdm <- diag(c(dfs$GPP_sd[irow], dfs$ET_sd[irow]))
+      covm <- sdm %*% corm %*% sdm
+      binorm <- rbinorm(nboot, covm)
+      GPP_syn[irow,] <- daily_cylce[irow] * mean_GPP + binorm[,1]
+      ET_syn[irow,] <- daily_cylce[irow] * mean_ET + binorm[,2]
+    }
+  }
+  # nboot artificial correlations - without VPD effect because R_pot is was used
+  corr_syn = daily_corr(
+    as.vector(ET_syn), as.vector(GPP_syn), rep(dfs$Rg_pot, nboot), nrow(dfs))
+  # real correlation
+  corr_obs <- daily_corr(dfs$ET, dfs$GPP*sqrt(dfs$VPD), dfs$Rg_pot, nrow(dfs))
+  # rank
+  dwci = sum(corr_syn < corr_obs)* 100/nboot
+  nrow = tibble(
+    mean_GPP = mean_GPP,
+    mean_ET = mean_ET,
+    corr_err = corr_err,
+    dwci = dwci
+    #,corr_art = corr_art
+  )
+}
+
+rbinorm <- function(N, sigma) {
+  # https://blog.revolutionanalytics.com/2016/08/simulating-form-the-bivariate-normal-distribution-in-r-1.html
+  M <- t(chol(sigma))
+  # M %*% t(M)
+  Z <- matrix(rnorm(2*N),2,N) # 2 rows, N/2 columns
+  bvn2 <- t(M %*% Z) #+ matrix(rep(mu,N), byrow=TRUE,ncol=2)
 }
 
 #' Daily correlation coefficient
@@ -296,7 +319,7 @@ compute_DWCI <- function(data, units_per_day = 48) {
 #' @param y
 #' @param Rg_pot potential incoming radiation
 #' @param units_per_day integer: frequency of the sub-daily measurements,
-#'    48 for half hourly measurements#'
+#'    48 for half hourly measurements
 #' @return correlation coefficents at daily timescale
 daily_corr <- function(x, y, Rg_pot, units_per_day = 48) {
   nday = length(x) / units_per_day

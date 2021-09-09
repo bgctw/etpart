@@ -74,7 +74,13 @@ test_that("daily_correlation", {
 })
 
 test_that("compute_DWCI", {
-  tmp <- compute_DWCI(DETha)
+  dwci <- compute_DWCI(DETha)
+  .tmp.f <- function(){
+    df_dwci
+    plot(dwci ~ iday, df_dwci)
+  }
+  #df_dwci
+  expect_equal(length(dwci), nrow(DETha)/48)
 })
 
 

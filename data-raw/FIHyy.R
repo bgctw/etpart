@@ -2,27 +2,13 @@ library(REddyProc)
 library(dplyr)
 library(bigleaf)
 library(ncdfTools) # https://github.com/bgctw/ncdfTools
+library(readr)
 
 
-
-# repeat 1 month of 1998 to span more years
-df <- bind_rows(
-  Example_DETha98,
-  Example_DETha98 %>% head(48*31) %>% mutate(Year = 1999)
-) %>%
-  fConvertTimeToPosix('YDH',Year = 'Year',Day = 'DoY', Hour = 'Hour') %>%
-  filterLongRuns("NEE")
-
-# load precip from MDIData
-ncfile = file.path("/Net/Groups/BGI"
-                   ,"data/DataStructureMDI/DATA"
-                   , "site/Fluxnet/halfhourly/level5/Data/single_sites"
-                   , "DE-Tha.1996.2006.hourly.nc"
-)
-infoNcdfVars(ncfile, order.var = 'id')$name # precip_f
-readNcdfVarName(ncfile)
-dfprecip <- readNcdfDataframe(ncfile, "precip") %>%
-  filter(between(time, min(df$DateTime), max(df$DateTime)+1))
+df0 <- read.csv(file.path("tmp","FIHyy.csv")) %>%
+df %>% df0 %>%
+  select(timestamp = TIMESTAMP_END, "NEE","NEE_f","Rg",)
+summary(df)
 
 df <- df %>%
   mutate(
