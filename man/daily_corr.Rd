@@ -10,7 +10,7 @@ daily_corr(x, y, Rg_pot, units_per_day = 48)
 \item{Rg_pot}{potential incoming radiation}
 
 \item{units_per_day}{integer: frequency of the sub-daily measurements,
-48 for half hourly measurements#'}
+48 for half hourly measurements}
 }
 \value{
 correlation coefficents at daily timescale

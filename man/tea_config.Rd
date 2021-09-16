@@ -11,7 +11,8 @@ tea_config(
   GPPlimit = 0.05,
   GPPdaylimit = 0.5,
   Tairlimit = 5,
-  Rglimit = 0
+  Rglimit = 0,
+  units_per_day = 48
 )
 }
 \arguments{
@@ -36,8 +37,7 @@ with air temperatures larger than this threshold}
 \item{Rglimit}{numeric scalar (W/m2): filter for half-hours
 with incoming radiation larger than this threshold}
 
-\item{s0}{numeric scalar of initial water storage
-(see \code{\link{compute_cswi}})}
+\item{units_per_day}{number of records per day, 48 for half-hourly data}
 }
 \value{
 list with the arguments

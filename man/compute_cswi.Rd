@@ -4,7 +4,7 @@
 \alias{compute_cswi}
 \title{Compute the conservative soil moisture index (CSWI)}
 \usage{
-compute_cswi(data, smax)
+compute_cswi(data, smax = 5)
 }
 \arguments{
 \item{data}{data.frame with numeric columns \code{precip} and \code{ET} in mm}

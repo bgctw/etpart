@@ -1,3 +1,65 @@
+#' preprocess for TEA partitioning
+#'
+#' Builds all the derived variables used in the partitioning such as CSWI,
+#' DWCI, etc., as well as filters which remove night time, low air temp/GPP,
+#' etc. periods.
+#'
+#' @param data data.frame of full days, must contain at least timestamp,
+#'   ET, GPP, RH, Rg, Rg_pot, Tair, VPD, precip,
+#' @param control
+#'
+#' @return ds with filters and additional indices
+#' \itemize{
+#'    \item \code{cswi}: see \code{\link{compute_cswi}},
+#'    \item \code{C_ET}, \code{C_Rg}: diurnal centroids,
+#'      see \code{\link{compute_diurnal_centroid}},
+#'    \item \code{dcwi}: see \code{\link{compute_DWCI}},
+#'    \item \code{Rg_pot_daily}: daily daily Rg_pot in MJ m-2 d-1
+#'    \item \code{year}: the year of the time-stamp
+#'       use mid-time-stamps. If using end-timestampes, NewYear is already next
+#'    \item \code{GPPgrad}: daily smoothed GPP gradient in umol C m-2 s-1 d-1
+#'      , which gives and indication of phenology
+#'    \item \code{Rpotgrad} and \code{Rpotgrad_day}: gradients in \code{Rpot}
+#'       and daily means of \code{Rpot}, which give an indication of time
+#'       in the year, ie. season
+#'    \item \code{tempFlag}: records with minimum temperature
+#'       (see \code{\link{tea_config}})
+#'    \item \code{GPPFlag}: records with minimum GPP and minimum daily GPP
+#'       (see \code{\link{tea_config}})
+#'    \item \code{seasonFlag}: combined \code{tempFlag} and \code{GPPFlag}
+#' }
+#' @export
+tea_preprocess <- function(data,  control = tea_config()) {
+  nrec = nrow(data)
+  nday = nrec / control$units_per_day
+  nrecday = control$units_per_day
+  df <- data %>% mutate(
+    cswi = compute_cswi(data, smax = control$smax)
+    , iday = rep(1:nday, each = nrecday)
+    , year = as.POSIXlt(timestamp)$year + 1900
+    , C_ET = rep(compute_diurnal_centroid(ET, nrecday), each = nrecday)
+    , C_Rg = rep(compute_diurnal_centroid(Rg, nrecday), each = nrecday)
+    #, dcwi = compute_DWCI(data, nrecday)
+    , GPPgrad = compute_GPPgrad(GPP, nrecday)
+    , Rpotgrad = ETPart:::gradient_equi(Rg_pot)
+    , Rpotgrad_day = rep(ETPart:::gradient_equi(
+        colMeans(matrix(Rg_pot, nrow = nrecday))), each = nrecday)
+    , DayNightFlag = Rg_pot > 0
+    , posFlag = GPP > 0 & ET > 0
+    , tempFlag = Tair > control$tempdaymin
+    , GPPday = rep(colMeans(matrix(GPP, nrow = nrecday)), each = nrecday)
+    , GPPFlag = GPPday > control$GPPdaymin & GPP > control$GPPmin
+    , seasonFlag = tempFlag * GPPFlag
+  )
+  dfday <- df %>% group_by(iday) %>%
+    summarise(
+      Rg_pot_daily = sum(Rg_pot) *((3600*(24/nrecday))/1000000)
+      ,.groups = "drop")
+  df <- df %>% mutate(
+    Rg_pot_daily = rep(dfday$Rg_pot_daily, each = nrecday)
+  )
+}
+
 #' partition ET by TEA
 #'
 #' The Transpiration Estimation Algorithm (TEA) partitions ET by first
@@ -27,8 +89,6 @@ partition_tea <- function(data,  control = tea_config()) {
 #'     do average over
 #' @param smax numeric scalar of maximum water storage
 #'     (see \code{\link{compute_cswi}})
-#' @param s0  numeric scalar of initial water storage
-#'     (see \code{\link{compute_cswi}})
 #' @param GPPlimit numeric scalar (mumol/m2/s): filter for half-hours
 #'     with carbon fluxes larger than this half-hourly threshold
 #' @param GPPdaylimit numeric scalar (mumol/m2/day): filter for days
@@ -37,6 +97,12 @@ partition_tea <- function(data,  control = tea_config()) {
 #'     with air temperatures larger than this threshold
 #' @param Rglimit numeric scalar (W/m2): filter for half-hours
 #'     with incoming radiation larger than this threshold
+#' @param units_per_day number of records per day, 48 for half-hourly data
+#' @param tempdaymin flag records of days having at list this minimum
+#'     daily air temperature in degree Celsius
+#' @param GPPdaymin flag records of days having at least this daily GPP in
+#'     gC m-1 d-1
+#' @param GPPmin flag days having at least this GPP in umol m-2 s-1
 #'
 #' @return list with the arguments
 #' @export
@@ -48,6 +114,10 @@ tea_config <- function(
   ,GPPdaylimit = 0.5
   ,Tairlimit = 5
   ,Rglimit = 0
+  ,units_per_day = 48
+  ,tempdaymin = 5
+  ,GPPdaymin=0.5
+  ,GPPmin=0.05
 ) {
   list(
     CSWIlimit = CSWIlimit
@@ -56,6 +126,10 @@ tea_config <- function(
     ,GPPlimit = GPPlimit
     ,Tairlimit = Tairlimit
     ,Rglimit = Rglimit
+    ,units_per_day = units_per_day
+    ,tempdaymin = tempdaymin
+    ,GPPdaymin = GPPdaymin
+    ,GPPmin = GPPmin
   )
 }
 
@@ -109,15 +183,20 @@ tea_filter <- function(data, control) {
 #'
 #' @return numeric vector of CSWI in mm
 #' @export
-compute_cswi <- function(data, smax) {
+compute_cswi <- function(data, smax = 5) {
   nrec <- nrow(data)
   s <- numeric(nrec)
-  ds <- data$precip - data$ET
+  # conservative: not knowing precip - refill upper soil storage
+  precip_f <- data$precip
+  precip_f[!is.finite(data$precip)] <- smax
+  ET_f <- data$ET
+  ET_f[!is.finite(data$ET)] <- -9999 # to comply to Nelson18
+  ds <- precip_f - ET_f
   s[1] <- smax #min(s0 + ds, smax)
   for (i in 2:nrec) {
     s[i] <- min(s[i-1] + ds[i], smax)
   }
-  cswi <- pmax(s, pmin(data$precip, smax))
+  cswi <- pmax(s, pmin(precip_f, smax))
 }
 
 #' sum GPP by day of year
@@ -356,8 +435,38 @@ daily_corr <- function(x, y, Rg_pot, units_per_day = 48) {
   # return(r**2)
 }
 
+#' Compute the seasonal gradiant from smoothed daily GPP.
+#'
+#' @param GPP numeric vector of gross primary productivity (umol m-2 s-1)
+#' @param nStepsPerDay number of records per day
+#'
+#' @return numeric vector of gradients
+#' @export
+compute_GPPgrad <- function(GPP, units_per_day = 48, sigma = 20.0){
+  gradGPP=GPP
+  gradGPP[is.na(GPP)] <- 0
+  gradGPP[(GPP < -9000)] <- 0
+  #GPPgrad <- rep=np.repeat(np.gradient(gaussian_filter(gradGPP.reshape(-1,nStepsPerDay).mean(axis=1),sigma=[20])),nStepsPerDay)
+  gppDay <- colMeans(matrix(GPP, nrow = units_per_day))
+  gppDay_smooth <- gaussianSmooth(gppDay, sigma) # from mmand
+  gppDay_grad <- ETPart:::gradient_equi(gppDay_smooth)
+  GPPgrad <- rep(gppDay_grad, each = units_per_day)
+  GPPgrad[(GPP < -9000)] <- NA
+  GPPgrad[is.na(GPP)] <- NA
+  GPPgrad[0]=0
+  return(GPPgrad)
+}
 
-
+gradient_equi <- function(x){
+  # https://numpy.org/doc/stable/reference/generated/numpy.gradient.html
+  # second order central differences in the interior points and
+  # first order at boundaries
+  # for equidistant series
+  # (x[i+1] - x[i-1])/2
+  gr_inner <- (x[-(1:2)] - x[-(length(x)-(1:0))])/2
+  # single gradients at the ends
+  gr <- c(diff(x[1:2]), gr_inner, diff(x[length(x)-(1:0)]))
+}
 
 
 

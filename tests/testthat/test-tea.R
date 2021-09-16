@@ -47,6 +47,8 @@ test_that("compute_cswi", {
     plot(cswi ~ timestamp, head(df2, 48*5))
     plot(cswi ~ timestamp, df2)
   }
+  cswi = compute_cswi(DETha)
+  df2 = mutate(DETha, cswi = cswi)
 })
 
 test_that("compute_diurnal_centroid", {
@@ -81,6 +83,28 @@ test_that("compute_DWCI", {
   }
   #df_dwci
   expect_equal(length(dwci), nrow(DETha)/48)
+})
+
+test_that("compute_GPPgrad", {
+  t <- 1:365 * 2*pi/365
+  GPPday <- sin(t)
+  nrecday <- 48
+  GPP <- rep(GPPday, each = nrecday) + 0.3*rnorm(365*nrecday)
+  plot(GPP)
+  GPPgrad <- compute_GPPgrad(GPP, nrecday)
+  GPPgrad_day <- GPPgrad[(0:364)*48 +1] *365/2/pi
+  .tmp.f <- function(){
+    plot(GPPgrad_day ~ t, type = "l")
+    lines(t,cos(t), col = "blue")
+    d <- GPPgrad_day - cos(t)
+    plot(d)
+    plot(d[50:315]) # edge effects of smoothing
+  }
+  expect_true(all(abs(d[50:315]) < 0.2))
+  GPPgrad <- compute_GPPgrad(FIHyy$GPP)
+  .tmp.f <- function(){
+    plot(GPPgrad ~ FIHyy$timestamp)
+  }
 })
 
 

@@ -20,13 +20,13 @@ ncfile = file.path("/Net/Groups/BGI"
                    , "DE-Tha.1996.2006.hourly.nc"
 )
 infoNcdfVars(ncfile, order.var = 'id')$name # precip_f
-readNcdfVarName(ncfile)
+#readNcdfVarName(ncfile)
 dfprecip <- readNcdfDataframe(ncfile, "precip") %>%
   filter(between(time, min(df$DateTime), max(df$DateTime)+1))
 
 df <- df %>%
   mutate(
-    ET = LE.to.ET(LE, Tair) # from bigleaf
+    ET = LE.to.ET(LE, Tair) * 60*30 # from bigleaf convert from mm/s to mm/half-hour
     , precip = dfprecip$precip
   )
 
@@ -52,7 +52,7 @@ df <- df %>% mutate(
 )
 
 DETha <- df %>% select(
-  timestamp = DateTime, ET, NEE, GPP, Tair = Tair_f, rH, VPD = VPD_f,
+  timestamp = DateTime, precip, ET, NEE, GPP, Tair = Tair_f, rH, VPD = VPD_f,
   Rg, Rg_pot, u = Ustar,
   GPP_sd, NEE_fall, ET_fall, ET_sd)
 
