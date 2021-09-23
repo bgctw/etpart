@@ -27,6 +27,8 @@
 #'    \item \code{GPPFlag}: records with minimum GPP and minimum daily GPP
 #'       (see \code{\link{tea_config}})
 #'    \item \code{seasonFlag}: combined \code{tempFlag} and \code{GPPFlag}
+#'    \item \code{inst_WUE}: instant water use efficiency (GPP/ET)
+#'        in g C per kg H2O
 #' }
 #' @export
 tea_preprocess <- function(data,  control = tea_config()) {
@@ -50,7 +52,9 @@ tea_preprocess <- function(data,  control = tea_config()) {
     , GPPday = rep(colMeans(matrix(GPP, nrow = nrecday)), each = nrecday)
     , GPPFlag = GPPday > control$GPPdaymin & GPP > control$GPPmin
     , seasonFlag = tempFlag * GPPFlag
+    , inst_WUE = ifelse(ET <= 0, 0, GPP/ET) * (12*1800)/1000
   )
+  if (!("quality_flag" %in% colnames(data))) df$quality_flag <- TRUE
   dfday <- df %>% group_by(iday) %>%
     summarise(
       Rg_pot_daily = sum(Rg_pot) *((3600*(24/nrecday))/1000000)
@@ -185,18 +189,35 @@ tea_filter <- function(data, control) {
 #' @export
 compute_cswi <- function(data, smax = 5) {
   nrec <- nrow(data)
-  s <- numeric(nrec)
   # conservative: not knowing precip - refill upper soil storage
   precip_f <- data$precip
   precip_f[!is.finite(data$precip)] <- smax
+  precip_f[data$precip < 0] <- smax
   ET_f <- data$ET
-  ET_f[!is.finite(data$ET)] <- -9999 # to comply to Nelson18
+  ET_f[!is.finite(data$ET)] <- -9999 # to comply to Nelson18 ?
   ds <- precip_f - ET_f
+  s <- numeric(nrec)
   s[1] <- smax #min(s0 + ds, smax)
+  # implementatation according to Nelson18 paper does not give negative values?
+  # for (i in 2:nrec) {
+  #   s[i] <- min(s[i-1] + ds[i], smax)
+  # }
+  # cswi <- pmax(s, pmin(precip_f, smax)) # wrong: only if precip > 0
+  # implementation according to TEA/CWSI.py
   for (i in 2:nrec) {
-    s[i] <- min(s[i-1] + ds[i], smax)
+    # bound current water balance by smax
+    stepval <- min(s[i-1] + ds[i], smax)
+    # in case of a positive precip value, the current CSWI is the max between the previous
+    # CSWI and either the value of the precip or the s0 depending on which is smaller
+    s[i] <- if (precip_f[i] > 0) {
+      max(stepval, min(precip_f[i-1], smax))  # i-1?
+    } else {
+      # if there is no precip, the CSWI is according to the stepVal,
+      # causing simple water balance behaviour
+      stepval
+    }
   }
-  cswi <- pmax(s, pmin(precip_f, smax))
+  s
 }
 
 #' sum GPP by day of year
