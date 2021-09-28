@@ -24,6 +24,16 @@ see \code{\link{compute_diurnal_centroid}},
 use mid-time-stamps. If using end-timestampes, NewYear is already next
 \item \code{GPPgrad}: daily smoothed GPP gradient in umol C m-2 s-1 d-1
 , which gives and indication of phenology
+\item \code{Rgpotgrad} and \code{Rpotgrad_day}: gradients in \code{Rpot}
+and daily means of \code{Rpot}, which give an indication of time
+in the year, ie. season
+\item \code{tempFlag}: records with minimum temperature
+(see \code{\link{tea_config}})
+\item \code{GPPFlag}: records with minimum GPP and minimum daily GPP
+(see \code{\link{tea_config}})
+\item \code{seasonFlag}: combined \code{tempFlag} and \code{GPPFlag}
+\item \code{inst_WUE}: instant water use efficiency (GPP/ET)
+in g C per kg H2O
 }
 }
 \description{

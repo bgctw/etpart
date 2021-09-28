@@ -10,8 +10,6 @@ compute_daily_GPP(GPP, timestamp)
 \item{GPP}{numeric vector to be summed}
 
 \item{timestamp}{POSIXct vector of times}
-
-\item{doy}{factor alternative to timestamp to specify the day of year}
 }
 \value{
 numeric vector (length GPP) with corresponding daily sum of GPP

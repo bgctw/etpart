@@ -8,6 +8,8 @@ correlations_from_artificial(dfs, nboot = 100)
 }
 \arguments{
 \item{dfs}{tibble with columns GPP, ET, GPP_sd, ET_sd, NEE_err, ET_err}
+
+\item{nboot}{number of bootstrap samples used}
 }
 \value{
 data.frame by day with columns mean_GPP, mean_ET,

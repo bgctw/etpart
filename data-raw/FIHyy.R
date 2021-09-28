@@ -1,7 +1,7 @@
-library(REddyProc)
+#library(REddyProc)
 library(dplyr)
 library(bigleaf)
-library(ncdfTools) # https://github.com/bgctw/ncdfTools
+#library(ncdfTools) # https://github.com/bgctw/ncdfTools
 library(readr)
 
 

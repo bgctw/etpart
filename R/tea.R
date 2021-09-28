@@ -6,7 +6,7 @@
 #'
 #' @param data data.frame of full days, must contain at least timestamp,
 #'   ET, GPP, RH, Rg, Rg_pot, Tair, VPD, precip,
-#' @param control
+#' @param control see \code{\link{tea_config}}
 #'
 #' @return ds with filters and additional indices
 #' \itemize{
@@ -19,7 +19,7 @@
 #'       use mid-time-stamps. If using end-timestampes, NewYear is already next
 #'    \item \code{GPPgrad}: daily smoothed GPP gradient in umol C m-2 s-1 d-1
 #'      , which gives and indication of phenology
-#'    \item \code{Rpotgrad} and \code{Rpotgrad_day}: gradients in \code{Rpot}
+#'    \item \code{Rgpotgrad} and \code{Rpotgrad_day}: gradients in \code{Rpot}
 #'       and daily means of \code{Rpot}, which give an indication of time
 #'       in the year, ie. season
 #'    \item \code{tempFlag}: records with minimum temperature
@@ -36,32 +36,54 @@ tea_preprocess <- function(data,  control = tea_config()) {
   nday = nrec / control$units_per_day
   nrecday = control$units_per_day
   df <- data %>% mutate(
-    cswi = compute_cswi(data, smax = control$smax)
+    CSWI = compute_cswi(data, smax = control$smax)
     , iday = rep(1:nday, each = nrecday)
-    , year = as.POSIXlt(timestamp)$year + 1900
-    , C_ET = rep(compute_diurnal_centroid(ET, nrecday), each = nrecday)
-    , C_Rg = rep(compute_diurnal_centroid(Rg, nrecday), each = nrecday)
+    , year = as.POSIXlt(.data$timestamp)$year + 1900
+    , C_ET = rep(compute_diurnal_centroid(.data$ET, nrecday), each = nrecday)
+    , C_Rg = rep(compute_diurnal_centroid(.data$Rg, nrecday), each = nrecday)
+    , C_Rg_ET = .data$C_ET - .data$C_Rg
     #, dcwi = compute_DWCI(data, nrecday)
-    , GPPgrad = compute_GPPgrad(GPP, nrecday)
-    , Rpotgrad = ETPart:::gradient_equi(Rg_pot)
-    , Rpotgrad_day = rep(ETPart:::gradient_equi(
-        colMeans(matrix(Rg_pot, nrow = nrecday))), each = nrecday)
-    , DayNightFlag = Rg_pot > 0
-    , posFlag = GPP > 0 & ET > 0
-    , tempFlag = Tair > control$tempdaymin
-    , GPPday = rep(colMeans(matrix(GPP, nrow = nrecday)), each = nrecday)
-    , GPPFlag = GPPday > control$GPPdaymin & GPP > control$GPPmin
-    , seasonFlag = tempFlag * GPPFlag
-    , inst_WUE = ifelse(ET <= 0, 0, GPP/ET) * (12*1800)/1000
+    , GPPgrad = compute_GPPgrad(.data$GPP, nrecday)
+    , Rgpotgrad = gradient_equi(.data$Rg_pot)
+    , Rpotgrad_day = rep_daily_aggregate(
+        .data$Rg_pot, compose(gradient_equi, colMeans), nrecday)
+    , DayNightFlag = .data$Rg_pot > 0
+    , posFlag = .data$GPP > 0 & .data$ET > 0
+    , tempFlag = .data$Tair > control$tempdaymin
+    , GPPday = rep_daily_aggregate(.data$GPP, colMeans, nrecday)
+    , GPPFlag = .data$GPPday > control$GPPdaymin & .data$GPP > control$GPPmin
+    , seasonFlag = .data$tempFlag * .data$GPPFlag
+    , inst_WUE = ifelse(.data$ET <= 0, 0, .data$GPP/.data$ET) * (12*1800)/1000
   )
   if (!("quality_flag" %in% colnames(data))) df$quality_flag <- TRUE
-  dfday <- df %>% group_by(iday) %>%
+  dfday <- df %>% group_by(.data$iday) %>%
     summarise(
-      Rg_pot_daily = sum(Rg_pot) *((3600*(24/nrecday))/1000000)
+      Rg_pot_daily = sum(.data$Rg_pot) *((3600*(24/nrecday))/1000000)
       ,.groups = "drop")
   df <- df %>% mutate(
     Rg_pot_daily = rep(dfday$Rg_pot_daily, each = nrecday)
   )
+}
+
+#' Compute daily aggregate and repeat it for each record
+#'
+#' x must have the same number of records for each day and contain
+#' only complete days.
+#'
+#' @param x vector
+#' @param FUN \code{function(x) -> numeric scalar} to aggregate over
+#'  each column of a matrix with a day in each row, i.e. \code{colSums} or
+#'  \code{applycols(sum)}
+#'   daily numeric vector
+#' @param nrecday number of records fore each day
+#'
+#' @return vector of the same length as x
+rep_daily_aggregate <- function(x, FUN, nrecday) {
+  rep(FUN(matrix(x, nrow = nrecday)), each = nrecday)
+}
+
+applycols <- function(FUN){
+  function(x) apply(x, 2, FUN)
 }
 
 #' partition ET by TEA
@@ -78,11 +100,11 @@ tea_preprocess <- function(data,  control = tea_config()) {
 #'
 #' @return see \code{\link{tea_predict}}
 #' @export
-partition_tea <- function(data,  control = tea_config()) {
+partition_tea <- function(data, control = tea_config()) {
   tea_checkvars(data)
-  dff <- tea_filter(data, control)
-  rf <- tea_fit_wue(dff, control)
-  datap <- tea_predict_wue(rf, data, control)
+  data_train <- tea_filter(data, control)
+  rf <- tea_fit_wue(data_train, control)
+  datap <- tea_predict(rf, data, control)
 }
 
 #' configure hyperparameters of the TEA algorithm
@@ -107,6 +129,7 @@ partition_tea <- function(data,  control = tea_config()) {
 #' @param GPPdaymin flag records of days having at least this daily GPP in
 #'     gC m-1 d-1
 #' @param GPPmin flag days having at least this GPP in umol m-2 s-1
+#' @param rfseed random generator seed used for random-forest fit
 #'
 #' @return list with the arguments
 #' @export
@@ -122,18 +145,21 @@ tea_config <- function(
   ,tempdaymin = 5
   ,GPPdaymin=0.5
   ,GPPmin=0.05
+  ,rfseed = 63233
 ) {
   list(
     CSWIlimit = CSWIlimit
     ,perc = perc
     ,smax = smax
     ,GPPlimit = GPPlimit
+    ,GPPdaylimit = GPPdaylimit
     ,Tairlimit = Tairlimit
     ,Rglimit = Rglimit
     ,units_per_day = units_per_day
     ,tempdaymin = tempdaymin
     ,GPPdaymin = GPPdaymin
     ,GPPmin = GPPmin
+    ,rfseed = rfseed
   )
 }
 
@@ -167,15 +193,23 @@ tea_checkvars <- function(data) {
   #       "Expected last time step to be at 00:00, but was ", data$timestep[nrec])
 }
 
+#' Filter conditions for training the TEA WUE model.
+#'
+#' @param data data.frame with columns GPP, Tair, Rg, and cswi
+#' @param control list with entries GPPlimit, GPPdaylimit, Tairlimit, Rglimit,
+#'   and CWSIlimit. See \code{\link{tea_config}}.
+#'
+#' @return data.frame containing only rows matching the filter criteria.
+#' @export
 tea_filter <- function(data, control) {
-  data$cswi <- compute_cswi(data, control$smax)
-  data$GPPday <- compute_daily_GPP(data$GPP)
+  #data$cswi <- compute_cswi(data, control$smax)
+  data$GPPday <- compute_daily_GPP(data$GPP, data$timestamp)
   dff <- data %>% filter(
-    GPP > control$GPPlimit &
-    GPPday > control$GPPdaylimit &
-    Tair > control$Tairlimit &
-    Rg > control$RgLimit &
-    cswi < control$CSWIlimit
+    ,.data$GPP > control$GPPlimit &
+      .data$GPPday > control$GPPdaylimit &
+      .data$Tair > control$Tairlimit &
+      .data$Rg > control$Rglimit &
+      .data$CSWI < control$CSWIlimit
   )
 }
 
@@ -183,7 +217,6 @@ tea_filter <- function(data, control) {
 #'
 #' @param data data.frame with numeric columns \code{precip} and \code{ET} in mm
 #' @param smax maximum water storage capacity in mm
-#' @param s0 initial water storage
 #'
 #' @return numeric vector of CSWI in mm
 #' @export
@@ -224,7 +257,6 @@ compute_cswi <- function(data, smax = 5) {
 #'
 #' @param GPP numeric vector to be summed
 #' @param timestamp POSIXct vector of times
-#' @param doy factor alternative to timestamp to specify the day of year
 #'
 #' @return numeric vector (length GPP) with corresponding daily sum of GPP
 #' @export
@@ -232,8 +264,9 @@ compute_daily_GPP <- function(GPP, timestamp) {
   yr <- as.POSIXlt(timestamp)$year
   doy = as.POSIXlt(timestamp)$yday
   GPPday0 <- aggregate(GPP, list(doy = doy, yr = yr), sum)$x
-  ndoyt <- table(doy, yr)
-  ndoy <- as.integer(ndoyt)[1:length(GPPday0)]
+  ndoyt <- table(yr, doy)
+  # skip 0-entries at start and end
+  ndoy <- ndoyt[ndoyt > 0]
   GPPday <- rep(GPPday0, times = ndoy )
 }
 
@@ -323,19 +356,19 @@ compute_DWCI <- function(data, units_per_day = 48) {
   #
   dfg <- data %>%
     mutate(iday = rep(1:nday, each = units_per_day)) %>%
-    group_by(iday) %>%
+    group_by(.data$iday) %>%
     mutate(
       #   # create the daily cycle by dividing Rg_pot by the daily mean
       #   daily_cycle=Rg_pot/Rg_pot.mean(axis=1)[:,None]
-      daily_cycle = Rg_pot/mean(Rg_pot, na.rm = FALSE),
+      daily_cycle = .data$Rg_pot/mean(.data$Rg_pot, na.rm = FALSE),
       # Isolate the error of the carbon and water fluxes.
-      NEE_err = NEE_fall - NEE,
-      ET_err = ET_fall - ET
+      NEE_err = .data$NEE_fall - .data$NEE,
+      ET_err = .data$ET_fall - .data$ET
     ) %>%
     nest()
   dfday <- dfg %>%
     mutate(df_corr_syn = map(data, correlations_from_artificial)) %>%
-    unnest(cols = c(iday, df_corr_syn))
+    unnest(cols = c(.data$iday, .data$df_corr_syn))
   dfday$dwci
 }
 
@@ -348,6 +381,7 @@ compute_DWCI <- function(data, units_per_day = 48) {
 #' and then gives the rank
 #'
 #' @param dfs tibble with columns GPP, ET, GPP_sd, ET_sd, NEE_err, ET_err
+#' @param nboot number of bootstrap samples used
 #'
 #' @return data.frame by day with columns mean_GPP, mean_ET,
 #'   corr_err (pearson correlation coefficient between errors of ET and NEE),
@@ -415,8 +449,8 @@ rbinorm <- function(N, sigma) {
 #' Vectors \code{x}, \code{y}, and \code{Rg} must have the same length.
 #' Only complete cases, i.e. no NAs are considered.
 #'
-#' @param x
-#' @param y
+#' @param x numeric vector to correlate
+#' @param y numeric vector to correlate
 #' @param Rg_pot potential incoming radiation
 #' @param units_per_day integer: frequency of the sub-daily measurements,
 #'    48 for half hourly measurements
@@ -432,11 +466,11 @@ daily_corr <- function(x, y, Rg_pot, units_per_day = 48) {
   #   mean( (x-mean(x))*(y-mean(y)) ) / (sd(x)*sd(y))
   # }
   ans <- dff %>%
-    filter(complete.cases(.)) %>%
-    filter(Rg_pot > 0) %>%
-    group_by(iday) %>%
+    drop_na() %>%
+    filter(.data$Rg_pot > 0) %>%
+    group_by(.data$iday) %>%
     summarise(
-      r2 = cor(x,y)^2
+      r2 = cor(.data$x,.data$y)^2
     )
   ans$r2
   # x=x.reshape(-1,48)
@@ -458,20 +492,22 @@ daily_corr <- function(x, y, Rg_pot, units_per_day = 48) {
 
 #' Compute the seasonal gradiant from smoothed daily GPP.
 #'
+#' @param nrecday integer scalar: number of records within one day
+#' @param sigma parameter to \code{mmand::gaussianSmooth} in units
+#'   number of days
 #' @param GPP numeric vector of gross primary productivity (umol m-2 s-1)
-#' @param nStepsPerDay number of records per day
 #'
-#' @return numeric vector of gradients
+#' @return numeric vector of gradients, repeated nrecday to match length of GPP
 #' @export
-compute_GPPgrad <- function(GPP, units_per_day = 48, sigma = 20.0){
+compute_GPPgrad <- function(GPP, nrecday = 48, sigma = 20.0){
   gradGPP=GPP
   gradGPP[is.na(GPP)] <- 0
   gradGPP[(GPP < -9000)] <- 0
   #GPPgrad <- rep=np.repeat(np.gradient(gaussian_filter(gradGPP.reshape(-1,nStepsPerDay).mean(axis=1),sigma=[20])),nStepsPerDay)
-  gppDay <- colMeans(matrix(GPP, nrow = units_per_day))
+  gppDay <- colMeans(matrix(GPP, nrow = nrecday))
   gppDay_smooth <- gaussianSmooth(gppDay, sigma) # from mmand
-  gppDay_grad <- ETPart:::gradient_equi(gppDay_smooth)
-  GPPgrad <- rep(gppDay_grad, each = units_per_day)
+  gppDay_grad <- gradient_equi(gppDay_smooth)
+  GPPgrad <- rep(gppDay_grad, each = nrecday)
   GPPgrad[(GPP < -9000)] <- NA
   GPPgrad[is.na(GPP)] <- NA
   GPPgrad[0]=0
@@ -488,6 +524,76 @@ gradient_equi <- function(x){
   # single gradients at the ends
   gr <- c(diff(x[1:2]), gr_inner, diff(x[length(x)-(1:0)]))
 }
+
+
+#' Fit a random forest model for predicting water use effciency (WUE)
+#'
+#' @param data_train trainign dataset where T = ET and hence WUE = GPP/ET
+#' @param control list with entries rfseed. See \code{\link{tea_config}}.
+#'
+#' @return a tidymodels workflow object
+#' @export
+tea_fit_wue <- function(data_train, control) {
+  data_train_wue <- data_train %>%
+    mutate(TEA_WUE = .data$GPP/.data$ET) # assuming T = ET)
+  rf_recipe <-
+    recipe(
+      TEA_WUE ~ Rg + Tair + RH + u + Rg_pot_daily + Rgpotgrad + year + GPPgrad +
+        #DWCI +
+        C_Rg_ET + CSWI
+      , data = data_train_wue
+    )
+    # ) %>%
+    # step_log(Sale_Price, base = 10) %>%
+    # step_other(Neighborhood, Overall_Qual, threshold = 50) %>%
+    # step_novel(Neighborhood, Overall_Qual) %>%
+    # step_dummy(Neighborhood, Overall_Qual)
+  rf_mod <- rand_forest(trees = 100, mtry = 3) %>%
+    set_engine("ranger", importance = "impurity", seed = control$rfseed, quantreg = TRUE) %>%
+    set_mode("regression")
+  set.seed(control$rfseed)
+  rf_wf <- workflows::workflow() %>%
+    add_model(rf_mod) %>%
+    add_recipe(rf_recipe) %>%
+    fit(data_train_wue)
+}
+
+#' Predict water use efficiency WUE, transpiration T, and evaporation E
+#'
+#' @param rf tidymodels workflow
+#' @param data data.frame with predictors as in traning data
+#' @param control see \code{\link{tea_config}}
+#'
+#' @return XXTODO
+#' @export
+tea_predict <- function(rf, data, control) {
+  # TODO
+}
+
+
+#' Predict quantiles from workflow's ranger fitting object for new data
+#'
+#' The workflow need to be constructed with
+#' \code{set_engine("ranger", quantreg = TRUE, ...)}.
+#' The newdata is transformed/prepared by \code{\link{bake}}.
+#'
+#' @param rf_wf tidymodels workflow
+#' @param newdata data.frame with predictors as in traning data
+#' @param quantiles numeric vector of probabilities of prediction distribution
+#'
+#' @return data.frame with one column for each quantile
+pred_ranger_quantiles <- function(rf_wf, newdata, quantiles = c(0.05,0.5,0.95)) {
+  predict(
+    rf_wf$fit$fit$fit,
+    workflows::extract_recipe(rf_wf) %>% bake(newdata),
+    type = "quantiles",
+    quantiles = quantiles
+  ) %>%
+    chuck("predictions") %>% # pick element named predictions
+    as_tibble() %>%
+    set_names(quantiles) #%>%
+}
+
 
 
 

@@ -4,15 +4,18 @@
 \alias{compute_GPPgrad}
 \title{Compute the seasonal gradiant from smoothed daily GPP.}
 \usage{
-compute_GPPgrad(GPP, units_per_day = 48, sigma = 20)
+compute_GPPgrad(GPP, nrecday = 48, sigma = 20)
 }
 \arguments{
 \item{GPP}{numeric vector of gross primary productivity (umol m-2 s-1)}
 
-\item{nStepsPerDay}{number of records per day}
+\item{nrecday}{integer scalar: number of records within one day}
+
+\item{sigma}{parameter to \code{\link{mmand::gaussianSmooth}} in units
+number of days}
 }
 \value{
-numeric vector of gradients
+numeric vector of gradients, repeated nrecday to match length of GPP
 }
 \description{
 Compute the seasonal gradiant from smoothed daily GPP.

@@ -8,11 +8,11 @@
 #'   from entry Tower.Team
 #' @export
 get_fluxnet_metadata <- function(site, fluxdatasite = "http://sites.fluxdata.org") {
-  if (!require("rvest")) stop(
+  if (!requireNamespace("rvest")) stop(
     "package rvest needs to be installed for using get_fluxnet_metadata")
   url <- paste0(fluxdatasite,"/",site)
   page <- rvest::read_html(url)
-  maininfo <- html_table(page, fill = TRUE)[[1]]
+  maininfo <- rvest::html_table(page, fill = TRUE)[[1]]
   labels <- gsub(":$","",trimws(maininfo[[1]]))
   values <- trimws(maininfo[[2]])
   as.numeric.try <- function(val){

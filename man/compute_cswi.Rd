@@ -10,8 +10,6 @@ compute_cswi(data, smax = 5)
 \item{data}{data.frame with numeric columns \code{precip} and \code{ET} in mm}
 
 \item{smax}{maximum water storage capacity in mm}
-
-\item{s0}{initial water storage}
 }
 \value{
 numeric vector of CSWI in mm
