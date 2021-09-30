@@ -11,7 +11,7 @@ compute_GPPgrad(GPP, nrecday = 48, sigma = 20)
 
 \item{nrecday}{integer scalar: number of records within one day}
 
-\item{sigma}{parameter to \code{\link{mmand::gaussianSmooth}} in units
+\item{sigma}{parameter to \code{mmand::gaussianSmooth} in units
 number of days}
 }
 \value{

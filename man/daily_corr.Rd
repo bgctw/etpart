@@ -4,7 +4,7 @@
 \alias{daily_corr}
 \title{Daily correlation coefficient}
 \usage{
-daily_corr(x, y, Rg_pot, units_per_day = 48)
+daily_corr(x, y, Rg_pot, nrecday = 48)
 }
 \arguments{
 \item{x}{numeric vector to correlate}
@@ -13,7 +13,7 @@ daily_corr(x, y, Rg_pot, units_per_day = 48)
 
 \item{Rg_pot}{potential incoming radiation}
 
-\item{units_per_day}{integer: frequency of the sub-daily measurements,
+\item{nrecday}{integer: frequency of the sub-daily measurements,
 48 for half hourly measurements}
 }
 \value{

@@ -12,7 +12,7 @@ tea_config(
   GPPdaylimit = 0.5,
   Tairlimit = 5,
   Rglimit = 0,
-  units_per_day = 48,
+  nrecday = 48,
   tempdaymin = 5,
   GPPdaymin = 0.5,
   GPPmin = 0.05,
@@ -41,7 +41,7 @@ with air temperatures larger than this threshold}
 \item{Rglimit}{numeric scalar (W/m2): filter for half-hours
 with incoming radiation larger than this threshold}
 
-\item{units_per_day}{number of records per day, 48 for half-hourly data}
+\item{nrecday}{number of records per day, 48 for half-hourly data}
 
 \item{tempdaymin}{flag records of days having at list this minimum
 daily air temperature in degree Celsius}
@@ -50,6 +50,8 @@ daily air temperature in degree Celsius}
 gC m-1 d-1}
 
 \item{GPPmin}{flag days having at least this GPP in umol m-2 s-1}
+
+\item{rfseed}{random generator seed used for random-forest fit}
 }
 \value{
 list with the arguments

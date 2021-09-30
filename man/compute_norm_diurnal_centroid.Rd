@@ -4,7 +4,7 @@
 \alias{compute_norm_diurnal_centroid}
 \title{Normalized diurnal centroid of latent energy (LE)}
 \usage{
-compute_norm_diurnal_centroid(flux, Rg, units_per_day = 48)
+compute_norm_diurnal_centroid(flux, Rg, nrecday = 48)
 }
 \arguments{
 \item{flux}{numeric vector of sub-daily flux (usuall LE)
@@ -12,7 +12,7 @@ that must be condinuous and regular}
 
 \item{Rg}{incoming radiation, can be any unit}
 
-\item{units_per_day}{integer: frequency of the sub-daily measurements,
+\item{nrecday}{integer: frequency of the sub-daily measurements,
 48 for half hourly measurements}
 }
 \value{

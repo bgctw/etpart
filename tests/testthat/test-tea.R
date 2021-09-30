@@ -51,6 +51,7 @@ test_that("compute_cswi", {
   df2 = mutate(DETha, cswi = cswi)
 })
 
+
 test_that("compute_diurnal_centroid", {
   #increase ET at 10:00am at second day
   # so that dci is shifted towards morning for second day
@@ -84,6 +85,17 @@ test_that("compute_DWCI", {
   #df_dwci
   expect_equal(length(dwci), nrow(DETha)/48)
 })
+
+test_that("compute_simplifiedDWCI", {
+  dwci <- compute_simplifiedDWCI(FIHyy)
+  .tmp.f <- function(){
+    df_dwci <- data.frame(dwci = dwci)
+    plot(dwci ~ iday, df_dwci)
+  }
+  #df_dwci
+  expect_equal(length(dwci), nrow(DETha)/48)
+})
+
 
 test_that("compute_GPPgrad", {
   t <- 1:365 * 2*pi/365

@@ -10,7 +10,7 @@ tea_preprocess(data, control = tea_config())
 \item{data}{data.frame of full days, must contain at least timestamp,
 ET, GPP, RH, Rg, Rg_pot, Tair, VPD, precip,}
 
-\item{control}{}
+\item{control}{see \code{\link{tea_config}}}
 }
 \value{
 ds with filters and additional indices

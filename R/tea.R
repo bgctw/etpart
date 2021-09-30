@@ -33,8 +33,8 @@
 #' @export
 tea_preprocess <- function(data,  control = tea_config()) {
   nrec = nrow(data)
-  nday = nrec / control$units_per_day
-  nrecday = control$units_per_day
+  nday = nrec / control$nrecday
+  nrecday = control$nrecday
   df <- data %>% mutate(
     CSWI = compute_cswi(data, smax = control$smax)
     , iday = rep(1:nday, each = nrecday)
@@ -123,7 +123,7 @@ partition_tea <- function(data, control = tea_config()) {
 #'     with air temperatures larger than this threshold
 #' @param Rglimit numeric scalar (W/m2): filter for half-hours
 #'     with incoming radiation larger than this threshold
-#' @param units_per_day number of records per day, 48 for half-hourly data
+#' @param nrecday number of records per day, 48 for half-hourly data
 #' @param tempdaymin flag records of days having at list this minimum
 #'     daily air temperature in degree Celsius
 #' @param GPPdaymin flag records of days having at least this daily GPP in
@@ -141,7 +141,7 @@ tea_config <- function(
   ,GPPdaylimit = 0.5
   ,Tairlimit = 5
   ,Rglimit = 0
-  ,units_per_day = 48
+  ,nrecday = 48
   ,tempdaymin = 5
   ,GPPdaymin=0.5
   ,GPPmin=0.05
@@ -155,7 +155,7 @@ tea_config <- function(
     ,GPPdaylimit = GPPdaylimit
     ,Tairlimit = Tairlimit
     ,Rglimit = Rglimit
-    ,units_per_day = units_per_day
+    ,nrecday = nrecday
     ,tempdaymin = tempdaymin
     ,GPPdaymin = GPPdaymin
     ,GPPmin = GPPmin
@@ -278,15 +278,15 @@ compute_daily_GPP <- function(GPP, timestamp) {
 #' @param flux numeric vector of sub-daily flux (usuall LE)
 #'   that must be condinuous and regular
 #' @param Rg incoming radiation, can be any unit
-#' @param units_per_day integer: frequency of the sub-daily measurements,
+#' @param nrecday integer: frequency of the sub-daily measurements,
 #'    48 for half hourly measurements
 #'
 #' @return The normalized diurnal centroid, in hours,
 #'  at a daily frequency
 #' @export
-compute_norm_diurnal_centroid <- function(flux, Rg, units_per_day = 48){
-  C_LE = compute_diurnal_centroid(flux, units_per_day=units_per_day)
-  C_Rg = compute_diurnal_centroid(Rg, units_per_day=units_per_day)
+compute_norm_diurnal_centroid <- function(flux, Rg, nrecday = 48){
+  C_LE = compute_diurnal_centroid(flux, nrecday=nrecday)
+  C_Rg = compute_diurnal_centroid(Rg, nrecday=nrecday)
   C_LE - C_Rg
 }
 
@@ -296,15 +296,15 @@ compute_norm_diurnal_centroid <- function(flux, Rg, units_per_day = 48){
 #'
 #' @param flux numeric vector of sub-daily flux that must be continuous
 #'    and regular of full days
-#' @param units_per_day integer: frequency of the sub-daily measurements,
+#' @param nrecday integer: frequency of the sub-daily measurements,
 #'    48 for half hourly measurements
 #'
 #' @return The diurnal centroid, in hours at a daily frequency
 #' @export
-compute_diurnal_centroid <- function(flux, units_per_day = 48) {
-  nday = length(flux) / units_per_day
-  fluxm <- matrix(flux, nrow = units_per_day)
-  hour = (1:units_per_day)/units_per_day*24
+compute_diurnal_centroid <- function(flux, nrecday = 48) {
+  nday = length(flux) / nrecday
+  fluxm <- matrix(flux, nrow = nrecday)
+  hour = (1:nrecday)/nrecday*24
   dci <- apply(fluxm, 2, function(x){
     sum(x*hour)/sum(x)
   })
@@ -317,6 +317,70 @@ compute_diurnal_centroid <- function(flux, units_per_day = 48) {
   # C=np.sum(hours*flux.reshape(-1,48),axis=1)/np.sum(flux.reshape(-1,48),axis=1)
   # C=C*(24/UnitsPerDay)
   # return(C)
+}
+
+#' simplified Diurnal water:carbon index (DWCI)
+#'
+#' similar to DWCI it
+#' measures the probability that the carbon and water are coupled
+#' within a given day. In difference to the full DWCI the correlation
+#' only the standard deviation of ET and GPP is used but not the
+#' daily correlation between NEE and ET errors.
+#' Hence, it can be used when noisefree, i.e. modelled, NEE_fall and ET_fall
+#' are not available.
+#'
+#' @param data data.frame of sub-daily timeseries with variables
+#' \describe{
+#' \item{Rg_pot}{Potential radiation}
+#' \item{ET}{evapotranspiration or latent energy}
+#' \item{GPP}{ross primary productivity}
+#' \item{VPD}{vapor pressure deficit}
+#' \item{NEE}{net ecosystem exchange}
+#' \item{ET_sd}{estimation of the uncertainty of ET}
+#' \item{GPP_sd}{eestimation of the uncertainty of GPP}
+#' }
+#' @param nrecday integer: frequency of the sub-daily measurements,
+#'    48 for half hourly measurements'
+#'
+#' @return numeric vector length(data)/nrecday: diurnal water:carbon index (DWCI)
+#' @export
+compute_simplifiedDWCI <- function(data, nrecday = 48) {
+  nboot = 100 # the number of artificial datasets to construct
+  nday = nrow(data) / nrecday
+  #   # creates an empty 2D dataset to hold the artificial distributions
+  #   StN=np.zeros([repeats,days])*np.nan
+  #   corrDev=np.zeros([days,2,2])
+  #
+  dfg <- data %>%
+    mutate(iday = rep(1:nday, each = nrecday)) %>%
+    group_by(.data$iday) %>%
+    mutate(
+      #   # create the daily cycle by dividing Rg_pot by the daily mean
+      #   daily_cycle=Rg_pot/Rg_pot.mean(axis=1)[:,None]
+      daily_cycle = .data$Rg_pot/mean(.data$Rg_pot, na.rm = FALSE),
+      # note that dfg is grouped by iday, so mean is across records of a day
+      GPP_mean = mean(.data$GPP),
+      ET_mean = mean(.data$ET)
+    )
+  sd_GPP <- dfg %>%
+    summarise(sd_GPP = sd(.data$GPP * dfg$GPP*sqrt(dfg$VPD))) %>% chuck("sd_GPP")
+  # bootstrap daily correlation by nrep, each column is a sample of all days
+  corr_syn <- do.call(cbind, map(1:nboot, function(irep){
+    dfg <- dfg %>% mutate(
+      NEE_err = suppressWarnings(rnorm(nrecday, sd = .data$NEE_sd)),
+      ET_err = suppressWarnings(rnorm(nrecday, sd = .data$ET_sd)),
+      GPP_DayCycle = .data$daily_cycle * .data$GPP_mean + .data$NEE_err,
+      ET_DayCycle = .data$daily_cycle * .data$ET_mean + .data$ET_err
+    )
+    dcorr = daily_corr(
+      dfg$ET_DayCycle, dfg$GPP_DayCycle*sqrt(dfg$VPD),
+      Rg_pot = dfg$Rg_pot, nrecday = nrecday)
+  }))
+  corr_obs <- daily_corr(dfg$ET, dfg$GPP*sqrt(dfg$VPD), dfg$Rg_pot, nrecday)
+  # rank
+  dwci <- rowSums(corr_syn < corr_obs)* 100/nboot # use vector recycling of corr_obs
+  dwci[sd_GPP == 0] <- 0 # prob of coupling is zero fi sd_GPP == 0 instead of NA
+  dwci
 }
 
 
@@ -342,20 +406,20 @@ compute_diurnal_centroid <- function(flux, units_per_day = 48) {
 #' \item{NEE_fall}{ Modeled net ecosystem exchange i.e. no noise}
 #' \item{ET_fall}{Modeled evapotranspiration or latent energy i.e. no noise}
 #' }
-#' @param units_per_day integer: frequency of the sub-daily measurements,
+#' @param nrecday integer: frequency of the sub-daily measurements,
 #'    48 for half hourly measurements'
 #'
-#' @return The diurnal water:carbon index (DWCI)
+#' @return numeric vector length(data)/nrecday: diurnal water:carbon index (DWCI)
 #' @export
-compute_DWCI <- function(data, units_per_day = 48) {
+compute_DWCI <- function(data, nrecday = 48) {
   nrep = 100 # the number of artificial datasets to construct
-  nday = nrow(data) / units_per_day
+  nday = nrow(data) / nrecday
   #   # creates an empty 2D dataset to hold the artificial distributions
   #   StN=np.zeros([repeats,days])*np.nan
   #   corrDev=np.zeros([days,2,2])
   #
   dfg <- data %>%
-    mutate(iday = rep(1:nday, each = units_per_day)) %>%
+    mutate(iday = rep(1:nday, each = nrecday)) %>%
     group_by(.data$iday) %>%
     mutate(
       #   # create the daily cycle by dividing Rg_pot by the daily mean
@@ -424,8 +488,8 @@ correlations_from_artificial <- function(dfs, nboot = 100){
   # real correlation
   corr_obs <- daily_corr(dfs$ET, dfs$GPP*sqrt(dfs$VPD), dfs$Rg_pot, nrow(dfs))
   # rank
-  dwci = sum(corr_syn < corr_obs)* 100/nboot
-  nrow = tibble(
+  dwci = sum(corr_syn < corr_obs)* 100/nboot # use vector recycling of corr_obs
+  ans = tibble(
     mean_GPP = mean_GPP,
     mean_ET = mean_ET,
     corr_err = corr_err,
@@ -452,25 +516,28 @@ rbinorm <- function(N, sigma) {
 #' @param x numeric vector to correlate
 #' @param y numeric vector to correlate
 #' @param Rg_pot potential incoming radiation
-#' @param units_per_day integer: frequency of the sub-daily measurements,
+#' @param nrecday integer: frequency of the sub-daily measurements,
 #'    48 for half hourly measurements
 #' @return correlation coefficents at daily timescale
-daily_corr <- function(x, y, Rg_pot, units_per_day = 48) {
-  nday = length(x) / units_per_day
+daily_corr <- function(x, y, Rg_pot, nrecday = 48) {
+  nday = length(x) / nrecday
   dff <- data.frame(
     x = x, y = y, Rg_pot = Rg_pot,
-    iday = rep(1:nday, each = units_per_day)
+    iday = rep(1:nday, each = nrecday)
   )
   # corf <- function(x,y) {
   #   # pearson product-moment correlation coefficient without na checking
   #   mean( (x-mean(x))*(y-mean(y)) ) / (sd(x)*sd(y))
   # }
   ans <- dff %>%
-    drop_na() %>%
-    filter(.data$Rg_pot > 0) %>%
+    #drop_na() %>%  # can drop entire days
+    #filter(.data$Rg_pot > 0) %>% # will fail at polar night - drops all days
+    # set to NA - witch will  give an NA correlation if all are NA
+    mutate(x = ifelse(.data$Rg_pot > 0, .data$x, NA)) %>%
     group_by(.data$iday) %>%
     summarise(
-      r2 = cor(.data$x,.data$y)^2
+      # warning on sd(x)==0 or sd(y)==0
+      r2 = suppressWarnings(cor(.data$x,.data$y, use = "na.or.complete")^2)
     )
   ans$r2
   # x=x.reshape(-1,48)

@@ -4,13 +4,13 @@
 \alias{compute_diurnal_centroid}
 \title{Diurnal centroid of sub-daily fluxes}
 \usage{
-compute_diurnal_centroid(flux, units_per_day = 48)
+compute_diurnal_centroid(flux, nrecday = 48)
 }
 \arguments{
 \item{flux}{numeric vector of sub-daily flux that must be continuous
 and regular of full days}
 
-\item{units_per_day}{integer: frequency of the sub-daily measurements,
+\item{nrecday}{integer: frequency of the sub-daily measurements,
 48 for half hourly measurements}
 }
 \value{
