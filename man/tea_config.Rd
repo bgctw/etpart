@@ -16,7 +16,8 @@ tea_config(
   tempdaymin = 5,
   GPPdaymin = 0.5,
   GPPmin = 0.05,
-  rfseed = 63233
+  rfseed = 63233,
+  quantiles_wue = seq(0.5, 1, length.out = 11)
 )
 }
 \arguments{
@@ -52,6 +53,8 @@ gC m-1 d-1}
 \item{GPPmin}{flag days having at least this GPP in umol m-2 s-1}
 
 \item{rfseed}{random generator seed used for random-forest fit}
+
+\item{quantiles_wue}{quantiles for which precitions of WUE}
 }
 \value{
 list with the arguments

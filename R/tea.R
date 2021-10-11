@@ -42,7 +42,7 @@ tea_preprocess <- function(data,  control = tea_config()) {
     , C_ET = rep(compute_diurnal_centroid(.data$ET, nrecday), each = nrecday)
     , C_Rg = rep(compute_diurnal_centroid(.data$Rg, nrecday), each = nrecday)
     , C_Rg_ET = .data$C_ET - .data$C_Rg
-    #, dcwi = compute_DWCI(data, nrecday)
+    , dcwi =
     , GPPgrad = compute_GPPgrad(.data$GPP, nrecday)
     , Rgpotgrad = gradient_equi(.data$Rg_pot)
     , Rpotgrad_day = rep_daily_aggregate(
@@ -55,6 +55,15 @@ tea_preprocess <- function(data,  control = tea_config()) {
     , seasonFlag = .data$tempFlag * .data$GPPFlag
     , inst_WUE = ifelse(.data$ET <= 0, 0, .data$GPP/.data$ET) * (12*1800)/1000
   )
+  df <- if (all(c("NEE_fall","ET_fall") %in% names(data))) {
+      df %>% mutate(DWCI = rep(compute_DWCI(data, nrecday), each = nrecday))
+  } else {
+    warning(
+      "Missing columns NEE_fall or ET_fall, therefore computing simplified ",
+      "DWCI with neglecting daily correlation between NEE and ET errors.")
+    df %>% mutate(
+      DWCI = rep(compute_simplifiedDWCI(data, nrecday), each = nrecday))
+  }
   if (!("quality_flag" %in% colnames(data))) df$quality_flag <- TRUE
   dfday <- df %>% group_by(.data$iday) %>%
     summarise(
@@ -98,7 +107,8 @@ applycols <- function(FUN){
 #' @param data data.frame with required columns: XX
 #' @param control list with configuration options see \code{\link{tea_config}}
 #'
-#' @return see \code{\link{tea_predict}}
+#' @return see \code{\link{tea_predict}}, \code{data} with predictions
+#'   percentiles of WUE, E and T appended.
 #' @export
 partition_tea <- function(data, control = tea_config()) {
   tea_checkvars(data)
@@ -130,6 +140,7 @@ partition_tea <- function(data, control = tea_config()) {
 #'     gC m-1 d-1
 #' @param GPPmin flag days having at least this GPP in umol m-2 s-1
 #' @param rfseed random generator seed used for random-forest fit
+#' @param quantiles_wue quantiles for which precitions of WUE
 #'
 #' @return list with the arguments
 #' @export
@@ -146,6 +157,7 @@ tea_config <- function(
   ,GPPdaymin=0.5
   ,GPPmin=0.05
   ,rfseed = 63233
+  ,quantiles_wue = seq(0.5,1.0,length.out = 11)
 ) {
   list(
     CSWIlimit = CSWIlimit
@@ -160,6 +172,7 @@ tea_config <- function(
     ,GPPdaymin = GPPdaymin
     ,GPPmin = GPPmin
     ,rfseed = rfseed
+    ,quantiles_wue = quantiles_wue
   )
 }
 
@@ -341,10 +354,12 @@ compute_diurnal_centroid <- function(flux, nrecday = 48) {
 #' }
 #' @param nrecday integer: frequency of the sub-daily measurements,
 #'    48 for half hourly measurements'
+#' @param na_value numeric scalar: to replace NA values in correlation
+#'    Defaults to 0.0 - i.e. no probability of correlation in DWCI.
 #'
 #' @return numeric vector length(data)/nrecday: diurnal water:carbon index (DWCI)
 #' @export
-compute_simplifiedDWCI <- function(data, nrecday = 48) {
+compute_simplifiedDWCI <- function(data, nrecday = 48, na_value = 0) {
   nboot = 100 # the number of artificial datasets to construct
   nday = nrow(data) / nrecday
   #   # creates an empty 2D dataset to hold the artificial distributions
@@ -380,6 +395,7 @@ compute_simplifiedDWCI <- function(data, nrecday = 48) {
   # rank
   dwci <- rowSums(corr_syn < corr_obs)* 100/nboot # use vector recycling of corr_obs
   dwci[sd_GPP == 0] <- 0 # prob of coupling is zero fi sd_GPP == 0 instead of NA
+  dwci[is.na(dwci)] <- na_value
   dwci
 }
 
@@ -408,10 +424,12 @@ compute_simplifiedDWCI <- function(data, nrecday = 48) {
 #' }
 #' @param nrecday integer: frequency of the sub-daily measurements,
 #'    48 for half hourly measurements'
+#' @param na_value numeric scalar: to replace NA values in correlation
+#'    Defaults to 0.0 - i.e. no probability of correlation in DWCI.
 #'
 #' @return numeric vector length(data)/nrecday: diurnal water:carbon index (DWCI)
 #' @export
-compute_DWCI <- function(data, nrecday = 48) {
+compute_DWCI <- function(data, nrecday = 48, na_value = 0.0) {
   nrep = 100 # the number of artificial datasets to construct
   nday = nrow(data) / nrecday
   #   # creates an empty 2D dataset to hold the artificial distributions
@@ -433,7 +451,10 @@ compute_DWCI <- function(data, nrecday = 48) {
   dfday <- dfg %>%
     mutate(df_corr_syn = map(data, correlations_from_artificial)) %>%
     unnest(cols = c(.data$iday, .data$df_corr_syn))
-  dfday$dwci
+  dwci <- dfday$dwci
+  dwci[data$sd_GPP == 0] <- 0 # prob of coupling is zero fi sd_GPP == 0 instead of NA
+  dwci[is.na(dwci)] <- na_value
+  dwci
 }
 
 #' Compute Artificial correlations from daily data
@@ -606,7 +627,7 @@ tea_fit_wue <- function(data_train, control) {
   rf_recipe <-
     recipe(
       TEA_WUE ~ Rg + Tair + RH + u + Rg_pot_daily + Rgpotgrad + year + GPPgrad +
-        #DWCI +
+        DWCI +
         C_Rg_ET + CSWI
       , data = data_train_wue
     )
@@ -615,8 +636,9 @@ tea_fit_wue <- function(data_train, control) {
     # step_other(Neighborhood, Overall_Qual, threshold = 50) %>%
     # step_novel(Neighborhood, Overall_Qual) %>%
     # step_dummy(Neighborhood, Overall_Qual)
-  rf_mod <- rand_forest(trees = 100, mtry = 3) %>%
-    set_engine("ranger", importance = "impurity", seed = control$rfseed, quantreg = TRUE) %>%
+  rf_mod <- rand_forest(trees = 100, mtry = round(11/3), min_n = 1) %>%
+    set_engine("ranger", importance = "impurity", seed = control$rfseed,
+               quantreg = TRUE) %>%
     set_mode("regression")
   set.seed(control$rfseed)
   rf_wf <- workflows::workflow() %>%
@@ -631,12 +653,20 @@ tea_fit_wue <- function(data_train, control) {
 #' @param data data.frame with predictors as in traning data
 #' @param control see \code{\link{tea_config}}
 #'
-#' @return XXTODO
+#' @return \code{data} with appended columns: \code{WUE_perc}, \code{T_perc},
+#'   and \code{ET_perc}
+#'   where \code{perc} is each prediction percentile corresponding to the
+#'   \code{control$quantile_wue}, e.g. 75 for the 0.75 prediction quantile.
 #' @export
 tea_predict <- function(rf, data, control) {
-  # TODO
+  wue_pred <- pred_ranger_quantiles(rf, data, control$quantiles_wue)
+  ET_pred <- compute_TandE(data$ET, wue_pred)
+  ET_pred_wide <- ET_pred %>%
+    select(-.data$ET) %>%
+    pivot_wider(.data$id, .data$perc, values_from = !c(.data$id, .data$perc)) %>%
+    select(-.data$id)
+  ans <- replace_columns(data, ET_pred_wide)
 }
-
 
 #' Predict quantiles from workflow's ranger fitting object for new data
 #'
@@ -644,21 +674,42 @@ tea_predict <- function(rf, data, control) {
 #' \code{set_engine("ranger", quantreg = TRUE, ...)}.
 #' The newdata is transformed/prepared by \code{\link{bake}}.
 #'
-#' @param rf_wf tidymodels workflow
+#' @param rf tidymodels workflow
 #' @param newdata data.frame with predictors as in traning data
 #' @param quantiles numeric vector of probabilities of prediction distribution
 #'
 #' @return data.frame with one column for each quantile
-pred_ranger_quantiles <- function(rf_wf, newdata, quantiles = c(0.05,0.5,0.95)) {
+pred_ranger_quantiles <- function(rf, newdata, quantiles = c(0.5,0.75)) {
   predict(
-    rf_wf$fit$fit$fit,
-    workflows::extract_recipe(rf_wf) %>% bake(newdata),
+    rf$fit$fit$fit,
+    workflows::extract_recipe(rf) %>% bake(newdata),
     type = "quantiles",
     quantiles = quantiles
   ) %>%
     chuck("predictions") %>% # pick element named predictions
     as_tibble() %>%
-    set_names(quantiles) #%>%
+    set_names(quantiles)
+}
+
+#' compute T and E from given ET and quantiles of water use efficiency (WUE)
+#'
+#' @param ET numeric vector of evapotranspiration
+#' @param wue_pred tibble with each column a prediction quantile of WUE
+#'   specifying the quantile as a number (0.0..1.0) in the column name
+#'
+#' @return tibble in long format with columsn ET, perc (1..100), WUE, T, E
+#'   column id identifies the original row-number in the wide format
+#' @export
+compute_TandE <- function(ET, wue_pred) {
+  wue_pred %>%
+    mutate(id = 1:n()) %>%
+    bind_cols(ET = ET) %>%
+    pivot_longer(-c(.data$ET, .data$id), "perc", values_to = "WUE",
+                 names_transform = list(perc = ~round(as.numeric(.x)*100))) %>%
+    mutate(
+      T = .data$ET * .data$WUE,
+      E = .data$ET - .data$T
+    )
 }
 
 

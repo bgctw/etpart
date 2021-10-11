@@ -1,9 +1,9 @@
-#' @importFrom stats aggregate complete.cases cor predict rnorm
+#' @importFrom stats aggregate complete.cases cor predict rnorm sd
 NULL
 
 #' @import dplyr
 #' @importFrom purrr map map_dfr set_names compose chuck
-#' @importFrom tidyr nest unnest replace_na drop_na
+#' @importFrom tidyr nest unnest replace_na drop_na pivot_longer pivot_wider
 NULL
 
 #' @importFrom mmand gaussianSmooth

@@ -86,14 +86,14 @@ test_that("compute_DWCI", {
   expect_equal(length(dwci), nrow(DETha)/48)
 })
 
-test_that("compute_simplifiedDWCI", {
+test_that("", {
   dwci <- compute_simplifiedDWCI(FIHyy)
-  .tmp.f <- function(){
+  .tmp.f <- function(){compute_simplifiedDWCI
     df_dwci <- data.frame(dwci = dwci)
     plot(dwci ~ iday, df_dwci)
   }
   #df_dwci
-  expect_equal(length(dwci), nrow(DETha)/48)
+  expect_equal(length(dwci), nrow(FIHyy)/48)
 })
 
 
@@ -119,8 +119,10 @@ test_that("compute_GPPgrad", {
   }
 })
 
+prepFIHyy <- suppressWarnings(tea_preprocess(FIHyy)) # reused
+
 test_that("tea_preprocess", {
-  df <- tea_preprocess(FIHyy)
+  df <- prepFIHyy # tea_preprocess(FIHyy)
   colnames <- c(
     "quality_flag", "CSWI", "year", "C_ET", "C_Rg"
     , "Rg_pot_daily" , "GPPgrad", "Rgpotgrad", "Rpotgrad_day"
@@ -129,15 +131,25 @@ test_that("tea_preprocess", {
   expect_true(all(colnames %in% names(df)))
   .tmp.f <- function(){
     plot(CSWI ~ timestamp, df, type = "l")
+    #library(feather) # crashes R
+    #library(arrow)
+    pydir <- "~/twutz/devpy/ecosystem-transpiration"
+    pydir <- "~/twutz_m/devpy/ecosystem-transpiration"
+    dir(pydir)
+    ec <- read_feather(file.path(pydir,"ec_tea_tutorial.feather"))
   }
 })
 
 test_that("tea_fit", {
   control <- tea_config()
-  df <- tea_preprocess(FIHyy)
+  df <- prepFIHyy #tea_preprocess(FIHyy)
   data_train <- tea_filter(df, control)
-  rf_wf <- tea_fit_wue(data_train, control)
-  wue_pred <- ETPart:::pred_ranger_quantiles(rf_wf, data_train)
+  rf <- tea_fit_wue(data_train, control)
+  #wue_pred <- ETPart:::pred_ranger_quantiles(rf, df, control$quantiles_wue)
+  qwue <- c(0.5,0.75)
+  tea_pred <- tea_predict(rf, df, within(control, quantiles_wue <- qwue))
+  expect_identical(tea_pred[,1:ncol(df)], df)
+  expect_true(all(c("WUE_50","WUE_75","T_50","T_75","E_50","E_75") %in% names(tea_pred)))
 })
 
 

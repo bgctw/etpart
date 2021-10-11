@@ -4,10 +4,10 @@
 \alias{pred_ranger_quantiles}
 \title{Predict quantiles from workflow's ranger fitting object for new data}
 \usage{
-pred_ranger_quantiles(rf_wf, newdata, quantiles = c(0.05, 0.5, 0.95))
+pred_ranger_quantiles(rf, newdata, quantiles = c(0.5, 0.75))
 }
 \arguments{
-\item{rf_wf}{tidymodels workflow}
+\item{rf}{tidymodels workflow}
 
 \item{newdata}{data.frame with predictors as in traning data}
 

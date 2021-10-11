@@ -12,7 +12,8 @@ partition_tea(data, control = tea_config())
 \item{control}{list with configuration options see \code{\link{tea_config}}}
 }
 \value{
-see \code{\link{tea_predict}}
+see \code{\link{tea_predict}}, \code{data} with predictions
+percentiles of WUE, E and T appended.
 }
 \description{
 The Transpiration Estimation Algorithm (TEA) partitions ET by first

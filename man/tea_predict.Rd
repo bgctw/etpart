@@ -14,7 +14,10 @@ tea_predict(rf, data, control)
 \item{control}{see \code{\link{tea_config}}}
 }
 \value{
-XXTODO
+\code{data} with appended columns: \code{WUE_perc}, \code{T_perc},
+and \code{ET_perc}
+where \code{perc} is each prediction percentile corresponding to the
+\code{control$quantile_wue}, e.g. 75 for the 0.75 prediction quantile.
 }
 \description{
 Predict water use efficiency WUE, transpiration T, and evaporation E

@@ -4,7 +4,7 @@
 \alias{compute_simplifiedDWCI}
 \title{simplified Diurnal water:carbon index (DWCI)}
 \usage{
-compute_simplifiedDWCI(data, nrecday = 48)
+compute_simplifiedDWCI(data, nrecday = 48, na_value = 0)
 }
 \arguments{
 \item{data}{data.frame of sub-daily timeseries with variables
@@ -20,6 +20,9 @@ compute_simplifiedDWCI(data, nrecday = 48)
 
 \item{nrecday}{integer: frequency of the sub-daily measurements,
 48 for half hourly measurements'}
+
+\item{na_value}{numeric scalar: to replace NA values in correlation
+Defaults to 0.0 - i.e. no probability of correlation in DWCI.}
 }
 \value{
 numeric vector length(data)/nrecday: diurnal water:carbon index (DWCI)
