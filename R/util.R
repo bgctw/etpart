@@ -1,3 +1,27 @@
+get_cumulative_day <- function(
+  ### get the cumulative day from a single equidistant time series
+  datetime  ##<< POSIXct vector
+){
+  ##note<< day is computed in associated time zone. Hence, convert UTC to local
+  ## time before
+  ##value<< cumulative day starting
+  # only works with equidistant where no days are missing
+  #cumDay <- cumsum(c(FALSE,diff(as.POSIXlt(dateHalfHour - 15L*60L)$yday) != 0))
+  as.numeric(as.Date(datetime))-min(as.numeric(as.Date(datetime)), na.rm=T)+1
+}
+get_halfhour_ofday <- function(
+  ### get the half-Hour within one day
+  dateHalfHour  ##<< POSIXct vector, indicating the end
+  ## a half-hour (00:30, 01:00, 01:30, ...)
+){
+  hour <- as.POSIXlt(dateHalfHour - 15L*60L)$hour
+  min <- as.POSIXlt(dateHalfHour - 30L*60L)$min
+  ##value<< 00:30 -> 1, 01:00 -> 2, ... , 23:30 -> 47, 00:00 -> 48
+  hour*2L + min/30L + 1L
+}
+
+
+
 replace_columns <- function(data, ..., add.unique = TRUE) {
   # from sjmisc
   # evaluate dots
@@ -27,3 +51,5 @@ replace_columns <- function(data, ..., add.unique = TRUE) {
 
   x
 }
+
+

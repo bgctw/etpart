@@ -3,6 +3,22 @@
 # Physiological and Micrometeorological Approaches
 
 
+
+#' partition ET by Priego approach
+#'
+#' @param data data.frame with required columns: XX
+#' @param control list with configuration options see \code{\link{priego_config}}
+#'
+#' @return see \code{\link{tea_predict}}, \code{data} with predictions
+#'   percentiles of WUE, E and T appended.
+#' @export
+partition_priego <- function(data, control = priego_config(), ...) {
+  lt <- calculate_longterm_leaf(data, ...)
+  dfT <- estimate_T_priego_5days(data, lt$chi_o, lt$WUE_o, ...)
+  dfT %>% mutate(E = ET - T)
+}
+
+
 #' @title "internal" leaf-to-ambient CO2 (chi_o) and Water use efficiency (WUE_o)
 #'
 #' @description Calculation of long-term effective "internal"
@@ -74,9 +90,15 @@ calculate_longterm_leaf <- function(
   list(chi_o = chi_o, WUE_o = WUE_o)
 }
 
+estimate_T_priego_5days <- function(data, iday, chi_o, WUE_o, ...) {
+  ds5 <- filter(data, between(cumday, iday - 2, iday + 2))
+  popt <- optim_priego(ds5, chi_o, WUE_o, ...)
+  ds5 %>%
+    filter(cumday == iday) %>%
+    mutate(T = predict_transpiration_opriego(popt, chi_o, WUE_o, ...))
+}
 
 
-# ' # Find the optimal paramerers
 #' @title  Model optimization routine
 #'
 #' @description Routine to estimate optimal parameters of a photosynthesis model
@@ -110,7 +132,7 @@ calculate_longterm_leaf <- function(
 #'   wind velocity (m s-1).
 #' @param ColSW_in      Column name of numeric vector containing time series of
 #'   incoming short-wave radiation (W m-2).
-#' @param Chi_o         Long-term effective chi
+#' @param chi_o         Long-term effective chi
 #' @param WUE_o         Long-term effective WUE
 #'
 #'
@@ -162,9 +184,10 @@ calculate_longterm_leaf <- function(
 #'  optimal_parameters(par_lower = c(0, 0, 10, 0)
 #'                     ,par_upper = c(400,0.4, 30, 1)
 #'                    ,data = tmp
-#'                    ,Chi_o = 0.88
+#'                    ,chi_o = 0.88
 #'                    ,WUE_o = 24.25)
-optim_priego <- function(par_lower, par_upper, data, Chi_o, WUE_o
+optim_priego <- function(data, chi_o, WUE_o
+     ,par_lower=c(0, 0, 10, 0), par_upper=c(400,0.4, 30, 1)
      ,ColPhotos = "GPP_NT_VUT_MEAN"
      ,ColPhotos_unc = "NEE_VUT_USTAR50_JOINTUNC"
      ,ColH = "H_F_MDS"
@@ -197,15 +220,17 @@ optim_priego <- function(par_lower, par_upper, data, Chi_o, WUE_o
     R_gas_constant = 0.287058, ##<< [J kg-1 deg K-1].
     M = 0.0289644 ##<< molar mass, [kg mol-1].
   )
-  # Airdensity [kg m-3].
-  dens = dsf$Pair/(constants$R_gas_constant*(dsf$Tair+273.15))
+  dens = calculate_air_density(dsf$Pair, dsf$Tair, constants) # [kg m-3].
   Mden = dens/constants$M ##<< molar air density [mol m-3].
   Photos_max = quantile(dsf$Photos, probs=c(0.90), na.rm=T)
   Dmax = mean(dsf$VPD[dsf$Photos>Photos_max], na.rm=T)
   Photos_unc_threshold = ifelse(
     dsf$Photos*0.1 > dsf$Photos_unc, dsf$Photos*0.1, dsf$Photos_unc)
+  # VPD_plant = estimate_VPD_plant(
+  #   H=H, Tair=Tair, Pair=Pair, VPD=VPD, ra=ra, constants=constants, dens=dens)
+  VPD_plant = dsf$VPD
   min.RSS <- function(p) cost_optim_opriego(
-    p, Chi_o, WUE_o,
+    p, chi_o, WUE_o,
     Photos = dsf$Photos,
     Photos_unc = dsf$Photos_unc,
     H = dsf$H,
@@ -214,11 +239,10 @@ optim_priego <- function(par_lower, par_upper, data, Chi_o, WUE_o
     Pair = dsf$Pair,
     Q = dsf$Q,
     Ca = dsf$Ca,
-    landa = dsf$landa,
     Ustar = dsf$Ustar,
     WS = dsf$WS,
-    ra_c = ra$ra_c, ra_w = ra$ra_w,
-    dens = dens, Mden = Mden, Photos_max = Photos_max, Dmax = Dmax,
+    ra = ra, VPD_plant = VPD_plant,
+    Mden = Mden, Photos_max = Photos_max, Dmax = Dmax,
     Photos_unc_threshold = Photos_unc_threshold
   )
   rss <- min.RSS(pars)
@@ -237,6 +261,10 @@ optim_priego <- function(par_lower, par_upper, data, Chi_o, WUE_o
   )
 }
 
+calculate_air_density <- function(Pair, Tair, constants) {
+  dens = Pair/(constants$R_gas_constant*(Tair+273.15))
+}
+
 compute_aerodynamic_conductance <- function(WS,Ustar) {
   #--  Aerodynamic conductance
   ra_m <- WS/Ustar^2 ##<< aerodynamic resistance to momentum transfer.
@@ -247,40 +275,63 @@ compute_aerodynamic_conductance <- function(WS,Ustar) {
   list(ra_w = ra_w, ra_c = ra_c)
 }
 
-cost_optim_opriego <- function(par, Chi_o, WUE_o,
-  Photos, Photos_unc, H, VPD, Tair, Pair, Q, Ca, landa, Ustar, WS,
-  ra_w, ra_c,
+cost_optim_opriego <- function(par, chi_o, WUE_o,
+  Photos, Photos_unc, H, VPD, Tair, Pair, Q, Ca, Ustar, WS,
+  # need supply the arguments below for performance, see optim_priego
+  constants,
+  ra, VPD_plant,
+  Mden, Photos_max, Dmax, Photos_unc_threshold
+  ) {
+  pred <- predict_T_GPP_opriego(
+    par, chi_o, WUE_o,
+    Photos, Photos_unc, H, VPD, Tair, Pair, Q, Ca, Ustar, WS,
+    constants,
+    ra, dens=NULL, VPD_plant,
+    Mden, Photos_max, Dmax, Photos_unc_threshold
+  )
+  WaterCost_i <- sum(pred$T, na.rm=T)/sum(pred$GPP, na.rm=T)
+  Phi <- WaterCost_i*WUE_o
+  FO <- sum(((pred$GPP-Photos)/Photos_unc_threshold)^2, na.rm=T)/length(Photos)
+  FO+Phi
+}
+
+predict_T_GPP_opriego <- function(
+  par, chi_o, WUE_o,
+  Photos, Photos_unc, H, VPD, Tair, Pair, Q, Ca, Ustar, WS,
   constants = list(
     Cp = 1003.5, ##<< heat capacity [J kg-1 K-1].
     R_gas_constant = 0.287058, ##<< [J kg-1 deg K-1].
     M = 0.0289644 ##<< molar mass, [kg mol-1].
   ),
-  # may supply the arguments below for performance
-  dens = Pair/(constants$R_gas_constant*(Tair+273.15)), # Air density [kg m-3].
+  # the following intermediates are independent of par and maybe precomputed
+  ra = compute_aerodynamic_conductance(WS, Ustar),
+  dens = calculate_air_density(Pair, Tair, constants), # [kg m-3].
+  VPD_plant = festimate_VPD(
+    H=H, Tair=Tair, Pair=Pair, VPD=VPD, ra=ra, constants=constants, dens=dens),
   Mden = dens/constants$M, ##<< molar air density [mol m-3].
   Photos_max = quantile(Photos, probs=c(0.90), na.rm=T),
   Dmax = mean(VPD[Photos>Photos_max], na.rm=T),
-  # We define the threshold of the uncertainties as the 1% of the magnitude of
-  # bthe observation.
-  Photos_unc_threshold = ifelse(Photos*0.1 > Photos_unc, Photos*0.1, Photos_unc)
-  ) {
-  # need correct column names and VPD in kPa, nonmissing Q in umol m-2 s-1
-  # need filtered data
-  # Chi_o is calculated using calculate_longerterm
-  #-- Fitting parameters
+  Photos_unc_threshold = ifelse(
+    Photos*0.1 > Photos_unc, Photos*0.1, Photos_unc)
+) {
+  beta <- par[4]
+  g_bulk <- estimate_canopy_conductances(
+    par, ra, chi_o, Ca,
+    Tair=Tair, VPD=VPD, Q=Q, Dmax=Dmax, Photos_max=Photos_max, Mden=Mden)
+  chi = chi_o*(1/(1+beta*VPD_plant^0.5))
+  transpiration_mod <- g_bulk$gw_bulk*VPD_plant/Pair*1000 ##<< [mmol H2O m-2 s-1]
+  Photos_mod <- g_bulk$gc_bulk*Ca*(1-chi)
+  list(T = transpiration_mod, GPP = Photos_mod)
+}
+
+estimate_canopy_conductances <- function(
+  par, ra, chi_o, Ca, Tair, VPD, Q, Dmax, Photos_max, Mden) {
   a1 <- par[1]
   D0 <- par[2]
   Topt <-  par[3]
   beta <- par[4]
-  #--  plant temperature (Tplant) and plant to air vapor pressure deficit (VPD_plant)
-  # Tplant <- (H*ra/(constants$Cp*dens))+Tair ##<< Approaximation of a surface temperature as canopy temperature (deg C)
-  # es_plant <- 0.61078*exp((17.269*Tplant)/(237.3+ Tplant)) ##<< saturated vapor presure deficit at the plant surface.
-  # es_air <- 0.61078*exp((17.269*Tair)/(237.3+ Tair)) ##<< saturated vapor presure deficit at the plant surface.
-  # ea <- es_air-VPD ##<< atmospheric vapor pressure [kPa]
-  # VPD_plant <- es_plant-ea ##<< Plant-to-air vapor pressure deficit [kPa]
-  VPD_plant <- VPD
   #-- Defining optimum parameters
-  Chimax <- Chi_o*(1/(1+beta*Dmax^0.5))
+  Chimax <- chi_o*(1/(1+beta*Dmax^0.5))
   # We assume that a max conductance is achieved at Photos_max
   # under optimum conditions.
   gcmax <- median(Photos_max/(Mden*Ca*(1-Chimax)), na.rm=T)
@@ -288,21 +339,33 @@ cost_optim_opriego <- function(par, Chi_o, WUE_o,
   gc_mod <- compute_stomatal_conductance_jarvis(par=par,Q,VPD,Tair,gcmax)
   gw_mod <- 1.6*gc_mod ## leaf canopy conductance to water vapor [m s-1]
   #--  Calculating "bulk" surface conductance
-  gc_bulk <- Mden/(1/(gc_mod)+ra_c) # bulk canopy conductance CO2 [mol m-2 s-1]
-  gw_bulk <- Mden/(1/(gw_mod)+ra_w) # bulk canopy conductance water[mol m-2 s-1]
-  #-- Estimating Chi
-  Chi <- Chi_o*(1/(1+beta*VPD_plant^0.5))
-  #-- Estimating photosynthesis and transpiration rates
-  Photos_mod <- gc_bulk*Ca*(1-Chi)
-  transpiration_mod <- gw_bulk*VPD_plant/Pair*1000 ##<< [mmol H2O m-2 s-1]
-  ##-- Objective function
-  WaterCost_i <- sum(transpiration_mod, na.rm=T)/sum(Photos_mod, na.rm=T)
-  Phi <- WaterCost_i*WUE_o
-  FO <- sum(((Photos_mod-Photos)/Photos_unc_threshold)^2, na.rm=T)/length(Photos_mod)
-  # FO <- sum((Photos_mod-Photos)^2, na.rm=T)/length(Photos_mod)
-  ## Summed cost
-  FO+Phi
+  gc_bulk <- Mden/(1/(gc_mod)+ra$ra_c) # bulk canopy conductance CO2 [mol m-2 s-1]
+  gw_bulk <- Mden/(1/(gw_mod)+ra$ra_w) # bulk canopy conductance water[mol m-2 s-1]
+  list(gc_bulk = gc_bulk, gw_bulk = gw_bulk)
 }
+
+
+estimate_VPD_plant <- function(
+  H, Tair, Pair, VPD, ra, constants,
+  dens = Pair/(constants$R_gas_constant*(Tair+273.15)) # Air density [kg m-3].
+) {
+  #--  plant temperature (Tplant) and plant to air vapor pressure deficit (VPD_plant)
+  # Approximation of a surface temperature as canopy temperature (deg C)
+  Tplant <- (H*ra/(constants$Cp*dens))+Tair
+  # saturated vapor pressure deficit at the plant surface.
+  es_plant <- 0.61078*exp((17.269*Tplant)/(237.3+ Tplant))
+  # saturated vapor pressure deficit at the plant surface.
+  es_air <- 0.61078*exp((17.269*Tair)/(237.3+ Tair))
+  # atmospheric vapor pressure [kPa]
+  ea <- es_air-VPD
+  # Plant-to-air vapor pressure deficit [kPa]
+  VPD_plant <- es_plant-ea
+}
+estimate_VPD_eddy <- function(
+  H, Tair, Pair, VPD, ra, constants,
+  dens = Pair/(constants$R_gas_constant*(Tair+273.15)) # Air density [kg m-3].
+) { VPD }
+
 
 #' @title Calculate stomatal conductance using Jarvis's approach.
 #'
@@ -362,6 +425,64 @@ compute_stomatal_conductance_jarvis <- function(par, Q, VPD, Tair, gcmax) {
   # scaling between 0 and 1.
   sensitivity_function_scaled <- sens_fun/max(sens_fun, na.rm=T)
   gcmax*sensitivity_function_scaled
+}
+
+
+#' Compute transpiration given optimized parameters
+#'
+#' @param par optimized parameters see
+#' @param data          Data.frame or matrix containing all required variables.
+#' @param chi_o         Long-term effective chi
+#' @param WUE_o         Long-term effective WUE
+#' @param ColPhotos     Column name of numeric vector containing time series of
+#'   photosynthesis data (umol CO2 m-2 s-1).
+#' @param ColPhotos_unc Column name of numeric vector containing time series of
+#'   photosynthesis uncertainties (umol CO2 m-2 s-1).
+#' @param ColH          Column name of numeric vector containing time series of
+#'   sensible heat flux (W m-2).
+#' @param ColVPD        Column name of numeric vector containing time series of
+#'  vapor pressure deficit (hPa).
+#' @param ColTair       Column name of numeric vector containing time series of
+#'   air temperature (deg C).
+#' @param ColPair       Column name of numeric vector containing time series of
+#'   atmospheric pressure (kPa).
+#' @param ColQ          Column name of numeric vector containing time series of
+#'   photosynthetic active radiation (umol m-2 s-1).
+#' @param ColCa         Column name of numeric vector containing time series of
+#'   atmospheric CO2 concentration (umol Co2 mol air-1).
+#' @param ColUstar      Column name of numeric vector containing time series of
+#'   wind friction velocity (m s-1).
+#' @param ColWS         Column name of numeric vector containing time series of
+#'   wind velocity (m s-1).
+#' @param ColSW_in      Column name of numeric vector containing time series of
+#'   incoming short-wave radiation (W m-2).
+#' @param ...           Further arguments to \code{predict_T_GPP_opriego}
+#'    such as a non-default \code{VPD_plant} or precomputed intermediates.
+#' @return vector of estimated transpiration for each record in data
+#' @export
+predict_transpiration_opriego <- function(
+  data, par, chi_o, WUE_o
+  ,ColPhotos = "GPP_NT_VUT_MEAN"
+  ,ColPhotos_unc = "NEE_VUT_USTAR50_JOINTUNC"
+  ,ColH = "H_F_MDS"
+  ,ColVPD = "VPD_F"
+  ,ColTair = "TA_F"
+  ,ColPair = "PA_F"
+  ,ColQ = "PPFD_IN"
+  ,ColCa = "CO2_F_MDS"
+  ,ColUstar = "USTAR"
+  ,ColWS = "WS_F"
+  ,ColSW_in = "SW_IN_F"
+  ,...
+) {
+  pred <- predict_T_GPP_opriego(
+    par, chi_o, WUE_o,
+    Photos=data[[ColPhotos]], Photos_unc=data[[ColPhotos_unc]], H=data[[ColH]],
+    VPD=data[[ColVPD]], Tair=data[[ColTair]], Pair=data[[ColPair]],
+    Q=data[[ColQ]], Ca=data[[ColCa]], Ustar=data[[ColUstar]], WS=data[[ColWS]],
+    ...
+  )
+  pred$T
 }
 
 

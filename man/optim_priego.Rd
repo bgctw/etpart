@@ -5,11 +5,11 @@
 \title{Model optimization routine}
 \usage{
 optim_priego(
-  par_lower,
-  par_upper,
   data,
-  Chi_o,
+  chi_o,
   WUE_o,
+  par_lower = c(0, 0, 10, 0),
+  par_upper = c(400, 0.4, 30, 1),
   ColPhotos = "GPP_NT_VUT_MEAN",
   ColPhotos_unc = "NEE_VUT_USTAR50_JOINTUNC",
   ColH = "H_F_MDS",
@@ -24,17 +24,17 @@ optim_priego(
 )
 }
 \arguments{
+\item{data}{Data.frame or matrix containing all required variables.}
+
+\item{chi_o}{Long-term effective chi}
+
+\item{WUE_o}{Long-term effective WUE}
+
 \item{par_lower}{A vector containing the lower bound of the parameters
 (a1,Do,To,beta)}
 
 \item{par_upper}{A vector containing the upper bound of the parameters
 (a1,Do,To,beta)}
-
-\item{data}{Data.frame or matrix containing all required variables.}
-
-\item{Chi_o}{Long-term effective chi}
-
-\item{WUE_o}{Long-term effective WUE}
 
 \item{ColPhotos}{Column name of numeric vector containing time series of
 photosynthesis data (umol CO2 m-2 s-1).}
@@ -110,7 +110,7 @@ by a factor describing the long-term effective water use efficiency (WUE_o).
  optimal_parameters(par_lower = c(0, 0, 10, 0)
                     ,par_upper = c(400,0.4, 30, 1)
                    ,data = tmp
-                   ,Chi_o = 0.88
+                   ,chi_o = 0.88
                    ,WUE_o = 24.25)
 }
 \references{
