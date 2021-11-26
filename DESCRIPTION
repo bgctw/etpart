@@ -2,18 +2,20 @@ Package: ETPart
 Title: Partitioning evapotranspiration into transpiration and evaporation
 Version: 0.0.0.9000
 Authors@R: 
-    person(given = "Thomas",
+    c(person(given = "Thomas",
            family = "Wutzler",
            role = c("aut", "cre"),
            email = "twutz@bgc-jena.mpg.de",
-           comment = c(ORCID = "0000-0003-4159-5445"))
+           comment = c(ORCID = "0000-0003-4159-5445")),
+     person("Oscar", "Perez-Priego", email = "opriego@ugr.es", role = c("aut")))
 Description: Tools that partition evapotranspiration flux (ET) into 
-    transpiration (T) and Evaporation (E). Including TEA (Nelson18).
+    transpiration (T) and Evaporation (E). Including TEA (Nelson18)
+    and physically based (Priego18).
 License: AGPL (>= 3)
 Encoding: UTF-8
 LazyData: true
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.1.1
+RoxygenNote: 7.1.2
 Imports: dplyr, mmand, parsnip, purrr, ranger, recipes, tidyr, workflows
 Suggests: 
     testthat (>= 3.0.0), rvest
