@@ -20,6 +20,8 @@ names(df0)[-1] <- berkeley_conv$colname
 df <- df0 %>% mutate(
   timestamp = REddyProc::BerkeleyJulianDateToPOSIXct(df0$TIMESTAMP_END) - 15*60
   , ET = LE.to.ET(LE, TA) * 60*30# from bigleaf convert mm/sec to mm/half-hour
+  , ET_sd = LE_RANDUNC * ET/LE
+  , NEE_sd = NEE_RANDUNC
   , RH = bigleaf::VPD.to.rH(VPD/10, TA)
   , quality_flag = (NEE_QC == 0) & (LE_QC == 0) &
       is.finite(ET) & is.finite(GPP_NT)
@@ -27,7 +29,8 @@ df <- df0 %>% mutate(
 
 FIHyy <- df %>% select(
   timestamp
-  , ET, GPP = GPP_DT, RH, Rg = SW_IN, Rg_pot = SW_IN_POT, Tair = TA
+  , ET, GPP = GPP_DT, RH, VPD, Rg = SW_IN, Rg_pot = SW_IN_POT, Tair = TA
+  , ET_sd, NEE_sd
   , precip = P, u = WS, quality_flag
 )
 
