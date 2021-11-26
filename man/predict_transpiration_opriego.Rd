@@ -4,66 +4,28 @@
 \alias{predict_transpiration_opriego}
 \title{Compute transpiration given optimized parameters}
 \usage{
-predict_transpiration_opriego(
-  data,
-  par,
-  chi_o,
-  WUE_o,
-  ColPhotos = "GPP_NT_VUT_MEAN",
-  ColPhotos_unc = "NEE_VUT_USTAR50_JOINTUNC",
-  ColH = "H_F_MDS",
-  ColVPD = "VPD_F",
-  ColTair = "TA_F",
-  ColPair = "PA_F",
-  ColQ = "PPFD_IN",
-  ColCa = "CO2_F_MDS",
-  ColUstar = "USTAR",
-  ColWS = "WS_F",
-  ColSW_in = "SW_IN_F",
-  ...
-)
+predict_transpiration_opriego(data, par, chi_o, WUE_o, ...)
 }
 \arguments{
-\item{data}{Data.frame or matrix containing all required variables.}
+\item{data}{Data.frame with columns
+\itemize{
+\item GPP:     photosynthesis data (umol CO2 m-2 s-1).
+\item GPP_sd:  photosynthesis uncertainties (umol CO2 m-2 s-1).
+\item H:       sensible heat flux (W m-2).
+\item VPD:     vapor pressure deficit (hPa).
+\item Tair:    air temperature (deg C).
+\item Pair:    atmospheric pressure (kPa).
+\item Q:       photosynthetic active radiation (umol m-2 s-1).
+\item Ca:      atmospheric CO2 concentration (umol Co2 mol air-1).
+\item ustar:   wind friction velocity (m s-1).
+\item u:       wind velocity (m s-1).
+}}
 
 \item{par}{optimized parameters see}
 
 \item{chi_o}{Long-term effective chi}
 
 \item{WUE_o}{Long-term effective WUE}
-
-\item{ColPhotos}{Column name of numeric vector containing time series of
-photosynthesis data (umol CO2 m-2 s-1).}
-
-\item{ColPhotos_unc}{Column name of numeric vector containing time series of
-photosynthesis uncertainties (umol CO2 m-2 s-1).}
-
-\item{ColH}{Column name of numeric vector containing time series of
-sensible heat flux (W m-2).}
-
-\item{ColVPD}{Column name of numeric vector containing time series of
-vapor pressure deficit (hPa).}
-
-\item{ColTair}{Column name of numeric vector containing time series of
-air temperature (deg C).}
-
-\item{ColPair}{Column name of numeric vector containing time series of
-atmospheric pressure (kPa).}
-
-\item{ColQ}{Column name of numeric vector containing time series of
-photosynthetic active radiation (umol m-2 s-1).}
-
-\item{ColCa}{Column name of numeric vector containing time series of
-atmospheric CO2 concentration (umol Co2 mol air-1).}
-
-\item{ColUstar}{Column name of numeric vector containing time series of
-wind friction velocity (m s-1).}
-
-\item{ColWS}{Column name of numeric vector containing time series of
-wind velocity (m s-1).}
-
-\item{ColSW_in}{Column name of numeric vector containing time series of
-incoming short-wave radiation (W m-2).}
 
 \item{...}{Further arguments to \code{predict_T_GPP_opriego}
 such as a non-default \code{VPD_plant} or precomputed intermediates.}

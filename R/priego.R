@@ -2,20 +2,118 @@
 # Priego et al. 2018: Partitioning Eddy Covariance Water Flux Components Using
 # Physiological and Micrometeorological Approaches
 
-
-
 #' partition ET by Priego approach
 #'
 #' @param data data.frame with required columns: XX
 #' @param control list with configuration options see \code{\link{priego_config}}
+#' @title  Model optimization routine
 #'
-#' @return see \code{\link{tea_predict}}, \code{data} with predictions
-#'   percentiles of WUE, E and T appended.
+#' @description Routine to estimate optimal parameters of a photosynthesis model
+#'   using a multi-constraint Markov Chain Monte Carlo (MCMC)
+#'   (see Perez-Priego et al., 2018).
+#'
+#' @param data          Data.frame with variables.
+#' \itemize{
+#'    \item those required by \code{\link{predict_transpiration_opriego}} and
+#'    \item Rg: incoming short-wave radiation (W m-2).
+#' }
+#' @param chi_o         Long-term effective chi
+#' @param WUE_o         Long-term effective WUE
+#'
+#' @details
+#' For each five-day window the short-term variation in leaf-internal
+#' water to CO2 ratio (chi) and the modifiers for photosynthesis fitted so to
+#'   minimize not only the mismatch between observed and modeled GPP but
+#'   also the unit cost of transpiration.
+#'   The transpiration cost is speciied  by introducing a conditional factor
+#'   demand (phi), which invokes the optimality hypothesis.
+#'   The phi term is to be defined as the integrated cost of transpiration
+#'   (i.e. transpiration_mod/photos_mod) over a time period (5 days) normalized
+#'   by a factor describing the long-term effective water use efficiency (WUE_o).
+#'
+#' These parameters are then used to predict transpiration.
+#'
+#' Evaporation is computed as difference to ET from eddy-covariance.
+#'
+#' The multi-objective function is defined as:
+#'
+#'  \deqn{OF <- sum((photos-photosy_mod)/photos_unc)^2)/n + phi}
+#'
+#'  where phi invokes optimality theory by minimizing the following term
+#'
+#'  \deqn{phi <- (sum(transpiration_mod)/sum(photos_mod)*WUE_o}
+#'
+#' The 4 model parameters (a1, Do, Topt and beta, see Perez-Priego 2018) are
+#'   \itemize{
+#'  \item{a1}{radiation curvature}
+#'  \item{D0}{empirical coef. related to response of stomatal closure to VPD.}
+#'  \item{Topt}{optimum temperature}
+#'  \item{beta}{A plant state variable defining the carbon cost of water.}
+#'   }
+#'
+#' @return a numeric vector containing 4 optimal parameters (a1,Do,To,beta):
+#'
+#' @references
+#' Perez-Priego, O., G. Katul, M. Reichstein et al. Partitioning eddy covariance
+#' water flux components using physiological and micrometeorological approaches,
+#' Journal of Geophysical Research: Biogeosciences. In press
+#'
+#' Reichstein, M., et al. (2005), On the separation of net ecosystem exchange
+#' into assimilation and ecosystem respiration: review and improved algorithm,
+#' Global Change Biology, 11(9), 1424-1439.
+#' @importFrom stats median
+#' @importFrom FME Latinhyper
+#' @importFrom  FME modMCMC
 #' @export
-partition_priego <- function(data, control = priego_config(), ...) {
-  lt <- calculate_longterm_leaf(data, ...)
-  dfT <- estimate_T_priego_5days(data, lt$chi_o, lt$WUE_o, ...)
+partition_priego <- function(data, config = priego_config(), ...) {
+  lt <- calculate_longterm_leaf(data, ..., config = config)
+  dfT <- estimate_T_priego_5days(data, lt$chi_o, lt$WUE_o, ..., config = config)
   dfT %>% mutate(E = ET - T)
+}
+
+#' Configure parameters of the Priego transpiration partitioning
+#'
+#' @param par_lower     A vector containing the lower bound of the parameters
+#'   (a1,Do,To,beta)
+#' @param par_upper     A vector containing the upper bound of the parameters
+#'   (a1,Do,To,beta)
+#' @param C Empirical coeficient for C3 species (see Wang et al., 2017; Plant Nature).
+#' @param Cp heat capacity [J kg-1 K-1]
+#' @param R_gas_constant [J kg-1 deg K-1]
+#' @param M_air molar mass of air, [kg mol-1]
+#' @param niter number of iterations for the MCMC
+#' @param updatecov number of iterations after which the parameter covariance
+#'    matrix is (re)evaluated based on the parameters kept thus far, and used
+#'    to update the MCMC jumps.
+#' @param ntrydr maximal number of tries for the delayed rejection procedure
+#' @param burninlength number of initial iterations to be removed from output.
+#'
+#' @return a list with above arguments as entries.
+#' @export
+priego_config <- function(
+  C = 1.189,
+  par_lower = c(a1=0, Do=0, To=10, beta=0),
+  par_upper = c(a1=400, Do=0.4, To=30, beta=1),
+  niter = 20000,
+  updatecov = 500,
+  ntrydr = 3,
+  burninlength = 10000,
+  Cp = 1003.5,
+  R_gas_constant = 0.287058,
+  M_air = 0.0289644
+) {
+  list(
+    C = C,
+    par_lower = par_lower,
+    par_upper = par_upper,
+    niter = niter,
+    updatecov = updatecov,
+    ntrydr = ntrydr,
+    burninlength = burninlength,
+    Cp = Cp,
+    R_gas_constant = R_gas_constant,
+    M_air = M_air
+  )
 }
 
 
@@ -24,13 +122,12 @@ partition_priego <- function(data, control = priego_config(), ...) {
 #' @description Calculation of long-term effective "internal"
 #'    leaf-to-ambient CO2 (chi_o) and Water use efficiency (WUE_o)
 #'
-#' @param data      Data.frame or matrix containing all required variables.
-#' @param ColPhotos column name of numeric vector containing time series of
-#'   photosynthesis data (umol CO2 m-2 s-1)
-#' @param ColVPD    column name of numeric vector containing time series of
-#'   vapor pressure deficit (kPa).
-#' @param ColTair   column name of numeric vector containing time series of
-#'   air temperature (deg C).
+#' @param data      Data.frame or matrix containing all variables.
+#' \itemize{
+#'    \item GPP: photosynthesis (umol CO2 m-2 s-1)
+#'    \item VPD: vapor pressure deficit (kPa).
+#'    \item Tair: air temperature (deg C).
+#'    }
 #' @param Z         Z- numeric value defining elevation (km).
 #' @param C         Empirical coeficient for C3 species.
 #'   (see Wang et al., 2017; Plant Nature)
@@ -48,7 +145,7 @@ partition_priego <- function(data, control = priego_config(), ...) {
 #'   \deqn{WUE_o <- (390*(1-chi_o)*96)/(1.6*VPD_g)*0.001}
 #'
 #' Tair_g and VPD_g are calculated based on the mean value of the growing period.
-#' The growing period is estimated as those periods over the 85 quantile of Photos.
+#' The growing period is estimated as those periods over the 85 quantile of GPP.
 #'
 #' @return list with numeric entries:
 #' \item{chi_o}{long-term effective "internal" leaf-to-ambient CO2 (unitless)}
@@ -66,21 +163,15 @@ partition_priego <- function(data, control = priego_config(), ...) {
 #' calculate_chi_o(EddySample)
 calculate_longterm_leaf <- function(
   data
-  ,ColPhotos = "GPP_NT_VUT_MEAN"
-  ,ColVPD = "VPD_F"
-  ,ColTair = "TA_F"
-  ,C = 1.189
-  ,Z = 0.27
+  ,Z
+  ,C = config$C
+  ,config = priego_config()
 ) {
-  iMissing <- which( !(c(ColPhotos, ColVPD, ColTair) %in% names(data)))
-  if (length(iMissing)) stop(
-    "Need to provide columns ",
-    paste(c(ColPhotos, ColVPD, ColTair)[iMissing], collapse = ", "))
+  check_required_cols(data, c("GPP","VPD","Tair"))
   dsagg <- data %>%
-    select(Photos = ColPhotos, VPD = ColVPD, Tair = ColTair) %>%
     mutate(VPD_kPa = VPD/10) %>%  # Converting VPD units (hPa -> kPa)
     # Defining optimal growing period according to quantiles of photosynthesis
-    filter(Photos >  quantile(Photos, probs = 0.85, na.rm=T)) %>%
+    filter(GPP >  quantile(GPP, probs = 0.85, na.rm=T)) %>%
     summarize(
       Tair_g = mean(Tair, na.rm = TRUE), VPD_g = mean(VPD_kPa, na.rm = TRUE))
   logistic_chi_o = 0.0545*(dsagg$Tair_g-25)-0.58*log(dsagg$VPD_g)-0.0815*Z+C
@@ -99,159 +190,52 @@ estimate_T_priego_5days <- function(data, iday, chi_o, WUE_o, ...) {
 }
 
 
-#' @title  Model optimization routine
-#'
-#' @description Routine to estimate optimal parameters of a photosynthesis model
-#'   using a multi-constraint Markov Chain Monte Carlo (MCMC)
-#'   (see Perez-Priego et al., 2018).
-#'
-#' @param par_lower     A vector containing the lower bound of the parameters
-#'   (a1,Do,To,beta)
-#' @param par_upper     A vector containing the upper bound of the parameters
-#'   (a1,Do,To,beta)
-#' @param data          Data.frame or matrix containing all required variables.
-#' @param ColPhotos     Column name of numeric vector containing time series of
-#'   photosynthesis data (umol CO2 m-2 s-1).
-#' @param ColPhotos_unc Column name of numeric vector containing time series of
-#'   photosynthesis uncertainties (umol CO2 m-2 s-1).
-#' @param ColH          Column name of numeric vector containing time series of
-#'   sensible heat flux (W m-2).
-#' @param ColVPD        Column name of numeric vector containing time series of
-#'  vapor pressure deficit (hPa).
-#' @param ColTair       Column name of numeric vector containing time series of
-#'   air temperature (deg C).
-#' @param ColPair       Column name of numeric vector containing time series of
-#'   atmospheric pressure (kPa).
-#' @param ColQ          Column name of numeric vector containing time series of
-#'   photosynthetic active radiation (umol m-2 s-1).
-#' @param ColCa         Column name of numeric vector containing time series of
-#'   atmospheric CO2 concentration (umol Co2 mol air-1).
-#' @param ColUstar      Column name of numeric vector containing time series of
-#'   wind friction velocity (m s-1).
-#' @param ColWS         Column name of numeric vector containing time series of
-#'   wind velocity (m s-1).
-#' @param ColSW_in      Column name of numeric vector containing time series of
-#'   incoming short-wave radiation (W m-2).
-#' @param chi_o         Long-term effective chi
-#' @param WUE_o         Long-term effective WUE
-#'
-#'
-#' @export
-#' @importFrom stats median
-#' @importFrom FME Latinhyper
-#' @importFrom  FME modMCMC
-#'
-#' @details the multi-objective function is defined as:
-#'
-#'
-#'            \deqn{OF <- sum((photos-photosy_mod)/photos_unc)^2)/n + phi}
-#'
-#'
-#'          where phi invokes optimality theory by minimizing the following term
-#'
-#'          \deqn{phi <- (sum(transpiration_mod)/sum(photos_mod)*WUE_o}
-#'
-#' @note The 4 model parameters (a1, Do, Topt and beta, see Perez-Priego 2018)
-#'   are estimated using a multi-constraint Markov Chain Monte Carlo (MCMC).
-#'   The objective function (OF) is to find those numerical solutions that
-#'   minimize not only the mismatch between observed and modeled Photos but
-#'   also the unit cost of transpiration by introducing a conditional factor
-#'   demand (phi), which invokes the optimality hypothesis.
-#'   The phi term is to be defined as the integrated cost of transpiration
-#'   (i.e. transpiration_mod/photos_mod) over a time period (5 days) normalized
-#'   by a factor describing the long-term effective water use efficiency (WUE_o).
-#' @return a numeric vector containing 4 optimal parameters (a1,Do,To,beta):
-#'  \item{a1}{radiation curvature}
-#'  \item{D0}{empirical coef. related to response of stomatal closure to VPD.}
-#'  \item{Topt}{optimum temperature}
-#'  \item{beta}{A plant state variable defining the carbon cost of water.}
-#'
-#' @references
-#' Perez-Priego, O., G. Katul, M. Reichstein et al. Partitioning eddy covariance
-#' water flux components using physiological and micrometeorological approaches,
-#' Journal of Geophysical Research: Biogeosciences. In press
-#'
-#' Reichstein, M., et al. (2005), On the separation of net ecosystem exchange
-#' into assimilation and ecosystem respiration: review and improved algorithm,
-#' Global Change Biology, 11(9), 1424-1439.
-#'
-#' @examples
-#'  ## Selecting a single day (e.g. 15-05-2011)
-#'  tmp <-  EddySample[ EddySample$TIMESTAMP_START>  201105150000,]
-#'  tmp <-  tmp[tmp$TIMESTAMP_START<  201105160000,]
-#'  ## Defining parameter values
-#'
-#'  optimal_parameters(par_lower = c(0, 0, 10, 0)
-#'                     ,par_upper = c(400,0.4, 30, 1)
-#'                    ,data = tmp
-#'                    ,chi_o = 0.88
-#'                    ,WUE_o = 24.25)
 optim_priego <- function(data, chi_o, WUE_o
-     ,par_lower=c(0, 0, 10, 0), par_upper=c(400,0.4, 30, 1)
-     ,ColPhotos = "GPP_NT_VUT_MEAN"
-     ,ColPhotos_unc = "NEE_VUT_USTAR50_JOINTUNC"
-     ,ColH = "H_F_MDS"
-     ,ColVPD = "VPD_F"
-     ,ColTair = "TA_F"
-     ,ColPair = "PA_F"
-     ,ColQ = "PPFD_IN"
-     ,ColCa = "CO2_F_MDS"
-     ,ColUstar = "USTAR"
-     ,ColWS = "WS_F"
-     ,ColSW_in = "SW_IN_F"
+     ,config = priego_config()
 ){
   dsf = data %>%
-    rename(Photos = ColPhotos, Photos_unc = ColPhotos_unc, H = ColH, VPD = ColVPD,
-           Tair = ColTair, Pair = ColPair, Q = ColQ, Q_in = ColSW_in, Ca = ColCa,
-           Ustar = ColUstar, WS = ColWS) %>%
-    filter(Photos>0 & Q>0 & Q_in>0) %>% # Rejecting bad data and filtering for daytime data
+    filter(GPP>0 & Q>0 & Rg>0) %>% # Rejecting bad data and filtering for daytime data
     mutate(
-      VPD = VPD/10, # Convert VPD units (hPa -> kPa)
-      Q_in = Q_in * 2, # convertion factor between W m2 to umol m-2 s-1
+      VPD_kPa = VPD/10, # Convert VPD units (hPa -> kPa)
       #If PAR is not provided we use SW_in instead as an approximation of PAR
-      Q = ifelse(is.na(Q), Q_in, Q),
-      landa = (3147.5-2.37*(Tair+273.15))*1000 # Latent heat of evaporisation [J kg-1]
+      # *2: conversion factor between W m2 to umol m-2 s-1
+      Q = ifelse(is.na(Q), Rg*2, Q),
+      #landa = (3147.5-2.37*(Tair+273.15))*1000 # Latent heat of evaporisation [J kg-1]
     )
-  pars <- Latinhyper(cbind(par_lower,par_upper),num = 1)
+  pars <- Latinhyper(cbind(config$par_lower,config$par_upper),num = 1)
   # try computing all that does not depend on parameters once outside cost
-  ra <- compute_aerodynamic_conductance(dsf$WS, dsf$Ustar)
-  constants = list(
-    Cp = 1003.5, ##<< heat capacity [J kg-1 K-1].
-    R_gas_constant = 0.287058, ##<< [J kg-1 deg K-1].
-    M = 0.0289644 ##<< molar mass, [kg mol-1].
-  )
-  dens = calculate_air_density(dsf$Pair, dsf$Tair, constants) # [kg m-3].
-  Mden = dens/constants$M ##<< molar air density [mol m-3].
-  Photos_max = quantile(dsf$Photos, probs=c(0.90), na.rm=T)
-  Dmax = mean(dsf$VPD[dsf$Photos>Photos_max], na.rm=T)
-  Photos_unc_threshold = ifelse(
-    dsf$Photos*0.1 > dsf$Photos_unc, dsf$Photos*0.1, dsf$Photos_unc)
+  ra <- compute_aerodynamic_conductance(dsf$u, dsf$ustar)
+  dens = calculate_air_density(dsf$Pair, dsf$Tair, config) # [kg m-3].
+  Mden = dens/config$M_air ##<< molar air density [mol m-3].
+  GPP_max = quantile(dsf$GPP, probs=c(0.90), na.rm=T)
+  Dmax = mean(dsf$VPD_kPa[dsf$GPP>GPP_max], na.rm=T)
+  GPP_sd_threshold = pmax(dsf$GPP*0.1, dsf$GPP_sd)
   # VPD_plant = estimate_VPD_plant(
-  #   H=H, Tair=Tair, Pair=Pair, VPD=VPD, ra=ra, constants=constants, dens=dens)
-  VPD_plant = dsf$VPD
+  #   H=H, Tair=Tair, Pair=Pair, VPD=VPD_kPa, ra=ra, config=config, dens=dens)
+  VPD_plant = dsf$VPD_kPa
   min.RSS <- function(p) cost_optim_opriego(
     p, chi_o, WUE_o,
-    Photos = dsf$Photos,
-    Photos_unc = dsf$Photos_unc,
+    GPP = dsf$GPP,
+    GPP_sd = dsf$GPP_sd,
     H = dsf$H,
-    VPD = dsf$VPD,
+    VPD = dsf$VPD_kPa,
     Tair = dsf$Tair,
     Pair = dsf$Pair,
     Q = dsf$Q,
     Ca = dsf$Ca,
-    Ustar = dsf$Ustar,
-    WS = dsf$WS,
+    ustar = dsf$ustar,
+    u = dsf$u,
     ra = ra, VPD_plant = VPD_plant,
-    Mden = Mden, Photos_max = Photos_max, Dmax = Dmax,
-    Photos_unc_threshold = Photos_unc_threshold
+    Mden = Mden, GPP_max = GPP_max, Dmax = Dmax,
+    GPP_sd_threshold = GPP_sd_threshold
   )
   rss <- min.RSS(pars)
   parMCMC <- try(modMCMC(f = min.RSS
                          ,p = as.numeric(pars)
-                         ,niter = 20000
-                         ,updatecov = 500, ntrydr = 3
-                         ,lower = par_lower , upper = par_upper
-                         ,burninlength = 10000))
+                         ,niter = config$niter
+                         ,updatecov = config$updatecov, ntrydr = config$ntrydr
+                         ,lower = config$par_lower , upper = config$par_upper
+                         ,burninlength = config$burninlength))
   out <- summary(parMCMC)
   paropt <- c(
     a1 = out[1,1],
@@ -259,16 +243,17 @@ optim_priego <- function(data, chi_o, WUE_o
     Topt = out[1,3],
     beta = out[1,4]
   )
+  list(paropt = paropt, parMCMC = parMCMC)
 }
 
-calculate_air_density <- function(Pair, Tair, constants) {
-  dens = Pair/(constants$R_gas_constant*(Tair+273.15))
+calculate_air_density <- function(Pair, Tair, config) {
+  dens = Pair/(config$R_gas_constant*(Tair+273.15))
 }
 
-compute_aerodynamic_conductance <- function(WS,Ustar) {
+compute_aerodynamic_conductance <- function(u,ustar) {
   #--  Aerodynamic conductance
-  ra_m <- WS/Ustar^2 ##<< aerodynamic resistance to momentum transfer.
-  ra_b <- 6.2*Ustar^-0.67 ##<< aerodynamic resistance to heat transfer.
+  ra_m <- u/ustar^2 ##<< aerodynamic resistance to momentum transfer.
+  ra_b <- 6.2*ustar^-0.67 ##<< aerodynamic resistance to heat transfer.
   ra <- ra_m+ra_b ##<< Monteith and Unsworth [2013]
   ra_w <- ra_m+2*(1.05/0.71/1.57)^(2/3)*ra_b # originally by Hicks et al., 1987.
   ra_c <- ra_m+2*(1.05/0.71)^(2/3)*ra_b
@@ -276,65 +261,62 @@ compute_aerodynamic_conductance <- function(WS,Ustar) {
 }
 
 cost_optim_opriego <- function(par, chi_o, WUE_o,
-  Photos, Photos_unc, H, VPD, Tair, Pair, Q, Ca, Ustar, WS,
+  GPP, GPP_sd, H, VPD, Tair, Pair, Q, Ca, ustar, u,
   # need supply the arguments below for performance, see optim_priego
-  constants,
+  config,
   ra, VPD_plant,
-  Mden, Photos_max, Dmax, Photos_unc_threshold
+  Mden, GPP_max, Dmax, GPP_sd_threshold
   ) {
+  # note, that VPD and VPD_Plant need to be specified in kPa (not hPa)
   pred <- predict_T_GPP_opriego(
     par, chi_o, WUE_o,
-    Photos, Photos_unc, H, VPD, Tair, Pair, Q, Ca, Ustar, WS,
-    constants,
+    GPP, GPP_sd, H, VPD, Tair, Pair, Q, Ca, ustar, u,
+    config,
     ra, dens=NULL, VPD_plant,
-    Mden, Photos_max, Dmax, Photos_unc_threshold
+    Mden, GPP_max, Dmax, GPP_sd_threshold
   )
   WaterCost_i <- sum(pred$T, na.rm=T)/sum(pred$GPP, na.rm=T)
   Phi <- WaterCost_i*WUE_o
-  FO <- sum(((pred$GPP-Photos)/Photos_unc_threshold)^2, na.rm=T)/length(Photos)
+  FO <- sum(((pred$GPP-GPP)/GPP_sd_threshold)^2, na.rm=T)/length(GPP)
   FO+Phi
 }
 
 predict_T_GPP_opriego <- function(
   par, chi_o, WUE_o,
-  Photos, Photos_unc, H, VPD, Tair, Pair, Q, Ca, Ustar, WS,
-  constants = list(
-    Cp = 1003.5, ##<< heat capacity [J kg-1 K-1].
-    R_gas_constant = 0.287058, ##<< [J kg-1 deg K-1].
-    M = 0.0289644 ##<< molar mass, [kg mol-1].
-  ),
+  GPP, GPP_sd, H, VPD, Tair, Pair, Q, Ca, ustar, u,
   # the following intermediates are independent of par and maybe precomputed
-  ra = compute_aerodynamic_conductance(WS, Ustar),
-  dens = calculate_air_density(Pair, Tair, constants), # [kg m-3].
+  config,
+  ra = compute_aerodynamic_conductance(u, ustar),
+  dens = calculate_air_density(Pair, Tair, config), # [kg m-3].
   VPD_plant = festimate_VPD(
-    H=H, Tair=Tair, Pair=Pair, VPD=VPD, ra=ra, constants=constants, dens=dens),
-  Mden = dens/constants$M, ##<< molar air density [mol m-3].
-  Photos_max = quantile(Photos, probs=c(0.90), na.rm=T),
-  Dmax = mean(VPD[Photos>Photos_max], na.rm=T),
-  Photos_unc_threshold = ifelse(
-    Photos*0.1 > Photos_unc, Photos*0.1, Photos_unc)
+    H=H, Tair=Tair, Pair=Pair, VPD=VPD, ra=ra, config=config, dens=dens),
+  Mden = dens/config$M, ##<< molar air density [mol m-3].
+  GPP_max = quantile(GPP, probs=c(0.90), na.rm=T),
+  Dmax = mean(VPD[GPP>GPP_max], na.rm=T),
+  GPP_sd_threshold = ifelse(
+    GPP*0.1 > GPP, GPP*0.1, GPP_sd)
 ) {
   beta <- par[4]
   g_bulk <- estimate_canopy_conductances(
     par, ra, chi_o, Ca,
-    Tair=Tair, VPD=VPD, Q=Q, Dmax=Dmax, Photos_max=Photos_max, Mden=Mden)
+    Tair=Tair, VPD=VPD, Q=Q, Dmax=Dmax, GPP_max=GPP_max, Mden=Mden)
   chi = chi_o*(1/(1+beta*VPD_plant^0.5))
   transpiration_mod <- g_bulk$gw_bulk*VPD_plant/Pair*1000 ##<< [mmol H2O m-2 s-1]
-  Photos_mod <- g_bulk$gc_bulk*Ca*(1-chi)
-  list(T = transpiration_mod, GPP = Photos_mod)
+  GPP_mod <- g_bulk$gc_bulk*Ca*(1-chi)
+  list(T = transpiration_mod, GPP = GPP_mod)
 }
 
 estimate_canopy_conductances <- function(
-  par, ra, chi_o, Ca, Tair, VPD, Q, Dmax, Photos_max, Mden) {
+  par, ra, chi_o, Ca, Tair, VPD, Q, Dmax, GPP_max, Mden) {
   a1 <- par[1]
   D0 <- par[2]
   Topt <-  par[3]
   beta <- par[4]
   #-- Defining optimum parameters
   Chimax <- chi_o*(1/(1+beta*Dmax^0.5))
-  # We assume that a max conductance is achieved at Photos_max
+  # We assume that a max conductance is achieved at GPP_max
   # under optimum conditions.
-  gcmax <- median(Photos_max/(Mden*Ca*(1-Chimax)), na.rm=T)
+  gcmax <- median(GPP_max/(Mden*Ca*(1-Chimax)), na.rm=T)
   #--  Calculating canopy stomatal conductance to CO2 [m s-1]
   gc_mod <- compute_stomatal_conductance_jarvis(par=par,Q,VPD,Tair,gcmax)
   gw_mod <- 1.6*gc_mod ## leaf canopy conductance to water vapor [m s-1]
@@ -346,12 +328,12 @@ estimate_canopy_conductances <- function(
 
 
 estimate_VPD_plant <- function(
-  H, Tair, Pair, VPD, ra, constants,
-  dens = Pair/(constants$R_gas_constant*(Tair+273.15)) # Air density [kg m-3].
+  H, Tair, Pair, VPD, ra, config,
+  dens = Pair/(config$R_gas_constant*(Tair+273.15)) # Air density [kg m-3].
 ) {
   #--  plant temperature (Tplant) and plant to air vapor pressure deficit (VPD_plant)
   # Approximation of a surface temperature as canopy temperature (deg C)
-  Tplant <- (H*ra/(constants$Cp*dens))+Tair
+  Tplant <- (H*ra/(config$Cp*dens))+Tair
   # saturated vapor pressure deficit at the plant surface.
   es_plant <- 0.61078*exp((17.269*Tplant)/(237.3+ Tplant))
   # saturated vapor pressure deficit at the plant surface.
@@ -362,8 +344,8 @@ estimate_VPD_plant <- function(
   VPD_plant <- es_plant-ea
 }
 estimate_VPD_eddy <- function(
-  H, Tair, Pair, VPD, ra, constants,
-  dens = Pair/(constants$R_gas_constant*(Tair+273.15)) # Air density [kg m-3].
+  H, Tair, Pair, VPD, ra, config,
+  dens = Pair/(config$R_gas_constant*(Tair+273.15)) # Air density [kg m-3].
 ) { VPD }
 
 
@@ -431,55 +413,34 @@ compute_stomatal_conductance_jarvis <- function(par, Q, VPD, Tair, gcmax) {
 #' Compute transpiration given optimized parameters
 #'
 #' @param par optimized parameters see
-#' @param data          Data.frame or matrix containing all required variables.
+#' @param data          Data.frame with columns
+#' \itemize{
+#'   \item GPP:     photosynthesis data (umol CO2 m-2 s-1).
+#'   \item GPP_sd:  photosynthesis uncertainties (umol CO2 m-2 s-1).
+#'   \item H:       sensible heat flux (W m-2).
+#'   \item VPD:     vapor pressure deficit (hPa).
+#'   \item Tair:    air temperature (deg C).
+#'   \item Pair:    atmospheric pressure (kPa).
+#'   \item Q:       photosynthetic active radiation (umol m-2 s-1).
+#'   \item Ca:      atmospheric CO2 concentration (umol Co2 mol air-1).
+#'   \item ustar:   wind friction velocity (m s-1).
+#'   \item u:       wind velocity (m s-1).
+#'   }
 #' @param chi_o         Long-term effective chi
 #' @param WUE_o         Long-term effective WUE
-#' @param ColPhotos     Column name of numeric vector containing time series of
-#'   photosynthesis data (umol CO2 m-2 s-1).
-#' @param ColPhotos_unc Column name of numeric vector containing time series of
-#'   photosynthesis uncertainties (umol CO2 m-2 s-1).
-#' @param ColH          Column name of numeric vector containing time series of
-#'   sensible heat flux (W m-2).
-#' @param ColVPD        Column name of numeric vector containing time series of
-#'  vapor pressure deficit (hPa).
-#' @param ColTair       Column name of numeric vector containing time series of
-#'   air temperature (deg C).
-#' @param ColPair       Column name of numeric vector containing time series of
-#'   atmospheric pressure (kPa).
-#' @param ColQ          Column name of numeric vector containing time series of
-#'   photosynthetic active radiation (umol m-2 s-1).
-#' @param ColCa         Column name of numeric vector containing time series of
-#'   atmospheric CO2 concentration (umol Co2 mol air-1).
-#' @param ColUstar      Column name of numeric vector containing time series of
-#'   wind friction velocity (m s-1).
-#' @param ColWS         Column name of numeric vector containing time series of
-#'   wind velocity (m s-1).
-#' @param ColSW_in      Column name of numeric vector containing time series of
-#'   incoming short-wave radiation (W m-2).
 #' @param ...           Further arguments to \code{predict_T_GPP_opriego}
 #'    such as a non-default \code{VPD_plant} or precomputed intermediates.
 #' @return vector of estimated transpiration for each record in data
 #' @export
 predict_transpiration_opriego <- function(
   data, par, chi_o, WUE_o
-  ,ColPhotos = "GPP_NT_VUT_MEAN"
-  ,ColPhotos_unc = "NEE_VUT_USTAR50_JOINTUNC"
-  ,ColH = "H_F_MDS"
-  ,ColVPD = "VPD_F"
-  ,ColTair = "TA_F"
-  ,ColPair = "PA_F"
-  ,ColQ = "PPFD_IN"
-  ,ColCa = "CO2_F_MDS"
-  ,ColUstar = "USTAR"
-  ,ColWS = "WS_F"
-  ,ColSW_in = "SW_IN_F"
   ,...
 ) {
   pred <- predict_T_GPP_opriego(
     par, chi_o, WUE_o,
-    Photos=data[[ColPhotos]], Photos_unc=data[[ColPhotos_unc]], H=data[[ColH]],
-    VPD=data[[ColVPD]], Tair=data[[ColTair]], Pair=data[[ColPair]],
-    Q=data[[ColQ]], Ca=data[[ColCa]], Ustar=data[[ColUstar]], WS=data[[ColWS]],
+    GPP=data$GPP, GPP_sd=data$GPP_sd, H=data$H,
+    VPD=data$VPD/10, Tair=data$Tair, Pair=data$Pair,
+    Q=data$Q, Ca=data$Ca, ustar=data$ustar, u=data$u,
     ...
   )
   pred$T

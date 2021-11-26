@@ -20,7 +20,12 @@ get_halfhour_ofday <- function(
   hour*2L + min/30L + 1L
 }
 
-
+check_required_cols <- function(data, required_names) {
+  iMissing <- which( !(required_names %in% names(data)))
+  if (length(iMissing)) stop(
+    "Need to provide columns ",
+    paste(c(required_names)[iMissing], collapse = ", "))
+}
 
 replace_columns <- function(data, ..., add.unique = TRUE) {
   # from sjmisc

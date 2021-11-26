@@ -4,31 +4,20 @@
 \alias{calculate_longterm_leaf}
 \title{"internal" leaf-to-ambient CO2 (chi_o) and Water use efficiency (WUE_o)}
 \usage{
-calculate_longterm_leaf(
-  data,
-  ColPhotos = "GPP_NT_VUT_MEAN",
-  ColVPD = "VPD_F",
-  ColTair = "TA_F",
-  C = 1.189,
-  Z = 0.27
-)
+calculate_longterm_leaf(data, Z, C = config$C, config = priego_config())
 }
 \arguments{
-\item{data}{Data.frame or matrix containing all required variables.}
+\item{data}{Data.frame or matrix containing all variables.
+\itemize{
+\item GPP: photosynthesis (umol CO2 m-2 s-1)
+\item VPD: vapor pressure deficit (kPa).
+\item Tair: air temperature (deg C).
+}}
 
-\item{ColPhotos}{column name of numeric vector containing time series of
-photosynthesis data (umol CO2 m-2 s-1)}
-
-\item{ColVPD}{column name of numeric vector containing time series of
-vapor pressure deficit (kPa).}
-
-\item{ColTair}{column name of numeric vector containing time series of
-air temperature (deg C).}
+\item{Z}{Z- numeric value defining elevation (km).}
 
 \item{C}{Empirical coeficient for C3 species.
 (see Wang et al., 2017; Plant Nature)}
-
-\item{Z}{Z- numeric value defining elevation (km).}
 }
 \value{
 list with numeric entries:
@@ -51,7 +40,7 @@ WUE_o:
 \deqn{WUE_o <- (390*(1-chi_o)*96)/(1.6*VPD_g)*0.001}
 
 Tair_g and VPD_g are calculated based on the mean value of the growing period.
-The growing period is estimated as those periods over the 85 quantile of Photos.
+The growing period is estimated as those periods over the 85 quantile of GPP.
 }
 \examples{
 calculate_chi_o(EddySample)

@@ -2,19 +2,70 @@
 % Please edit documentation in R/priego.R
 \name{partition_priego}
 \alias{partition_priego}
-\title{partition ET by Priego approach}
+\title{Model optimization routine}
 \usage{
-partition_priego(data, control = priego_config(), ...)
+partition_priego(data, config = priego_config(), ...)
 }
 \arguments{
-\item{data}{data.frame with required columns: XX}
+\item{data}{Data.frame with variables.
+\itemize{
+\item those required by \code{\link{predict_transpiration_opriego}} and
+\item Rg: incoming short-wave radiation (W m-2).
+}}
 
 \item{control}{list with configuration options see \code{\link{priego_config}}}
+
+\item{chi_o}{Long-term effective chi}
+
+\item{WUE_o}{Long-term effective WUE}
 }
 \value{
-see \code{\link{tea_predict}}, \code{data} with predictions
-percentiles of WUE, E and T appended.
+a numeric vector containing 4 optimal parameters (a1,Do,To,beta):
 }
 \description{
+Routine to estimate optimal parameters of a photosynthesis model
+using a multi-constraint Markov Chain Monte Carlo (MCMC)
+(see Perez-Priego et al., 2018).
+}
+\details{
 partition ET by Priego approach
+
+For each five-day window the short-term variation in leaf-internal
+water to CO2 ratio (chi) and the modifiers for photosynthesis fitted so to
+minimize not only the mismatch between observed and modeled GPP but
+also the unit cost of transpiration.
+The transpiration cost is speciied  by introducing a conditional factor
+demand (phi), which invokes the optimality hypothesis.
+The phi term is to be defined as the integrated cost of transpiration
+(i.e. transpiration_mod/photos_mod) over a time period (5 days) normalized
+by a factor describing the long-term effective water use efficiency (WUE_o).
+
+These parameters are then used to predict transpiration.
+
+Evaporation is computed as difference to ET from eddy-covariance.
+
+The multi-objective function is defined as:
+
+\deqn{OF <- sum((photos-photosy_mod)/photos_unc)^2)/n + phi}
+
+where phi invokes optimality theory by minimizing the following term
+
+\deqn{phi <- (sum(transpiration_mod)/sum(photos_mod)*WUE_o}
+
+The 4 model parameters (a1, Do, Topt and beta, see Perez-Priego 2018) are
+\itemize{
+\item{a1}{radiation curvature}
+\item{D0}{empirical coef. related to response of stomatal closure to VPD.}
+\item{Topt}{optimum temperature}
+\item{beta}{A plant state variable defining the carbon cost of water.}
+}
+}
+\references{
+Perez-Priego, O., G. Katul, M. Reichstein et al. Partitioning eddy covariance
+water flux components using physiological and micrometeorological approaches,
+Journal of Geophysical Research: Biogeosciences. In press
+
+Reichstein, M., et al. (2005), On the separation of net ecosystem exchange
+into assimilation and ecosystem respiration: review and improved algorithm,
+Global Change Biology, 11(9), 1424-1439.
 }
