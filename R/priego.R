@@ -94,10 +94,11 @@ priego_config <- function(
   C = 1.189,
   par_lower = c(a1=0, Do=0, To=10, beta=0),
   par_upper = c(a1=400, Do=0.4, To=30, beta=1),
-  niter = 20000,
-  updatecov = 500,
-  ntrydr = 3,
-  burninlength = 10000,
+  #niter = 20000,
+  niter = 2000,
+  updatecov = 200,
+  ntrydr = 1,
+  burninlength = 600,
   Cp = 1003.5,
   R_gas_constant = 0.287058,
   M_air = 0.0289644
@@ -183,10 +184,16 @@ calculate_longterm_leaf <- function(
 
 estimate_T_priego_5days <- function(data, iday, chi_o, WUE_o, ...) {
   ds5 <- filter(data, between(cumday, iday - 2, iday + 2))
-  popt <- optim_priego(ds5, chi_o, WUE_o, ...)
-  ds5 %>%
+  popt <- ds5 %>%
+    # better do inside optim_priego
+    # mutate(
+    #   GPP_sd = ifelse(is.na(.data$GPP_sd), .data$GPP*0.1,.data$GPP_sd),
+    #   Q = ifelse(is.na(.data$Q)==TRUE, .data$Rg*2,  .data$Q)
+    # ) %>%
+    optim_priego(chi_o, WUE_o, ...)
+  ans <- ds5 %>%
     filter(cumday == iday) %>%
-    mutate(T = predict_transpiration_opriego(popt, chi_o, WUE_o, ...))
+    mutate(T = predict_transpiration_opriego(.data, popt$paropt, chi_o, WUE_o, ...))
 }
 
 
@@ -194,13 +201,14 @@ optim_priego <- function(data, chi_o, WUE_o
      ,config = priego_config()
 ){
   dsf = data %>%
-    filter(GPP>0 & Q>0 & Rg>0) %>% # Rejecting bad data and filtering for daytime data
+    filter(!isnight & GPP>0 & Q>0 & Rg>0) %>% # Rejecting bad data and filtering for daytime data
     mutate(
       VPD_kPa = VPD/10, # Convert VPD units (hPa -> kPa)
       #If PAR is not provided we use SW_in instead as an approximation of PAR
       # *2: conversion factor between W m2 to umol m-2 s-1
       Q = ifelse(is.na(Q), Rg*2, Q),
       #landa = (3147.5-2.37*(Tair+273.15))*1000 # Latent heat of evaporisation [J kg-1]
+      GPP_sd = ifelse(is.na(.data$GPP_sd), .data$GPP*0.1, .data$GPP_sd),
     )
   pars <- Latinhyper(cbind(config$par_lower,config$par_upper),num = 1)
   # try computing all that does not depend on parameters once outside cost
@@ -257,7 +265,7 @@ compute_aerodynamic_conductance <- function(u,ustar) {
   ra <- ra_m+ra_b ##<< Monteith and Unsworth [2013]
   ra_w <- ra_m+2*(1.05/0.71/1.57)^(2/3)*ra_b # originally by Hicks et al., 1987.
   ra_c <- ra_m+2*(1.05/0.71)^(2/3)*ra_b
-  list(ra_w = ra_w, ra_c = ra_c)
+  list(ra_w = ra_w, ra_c = ra_c, ra = ra)
 }
 
 cost_optim_opriego <- function(par, chi_o, WUE_o,
@@ -272,6 +280,7 @@ cost_optim_opriego <- function(par, chi_o, WUE_o,
     par, chi_o, WUE_o,
     GPP, GPP_sd, H, VPD, Tair, Pair, Q, Ca, ustar, u,
     config,
+    estimate_VPD_eddy,
     ra, dens=NULL, VPD_plant,
     Mden, GPP_max, Dmax, GPP_sd_threshold
   )
@@ -286,6 +295,7 @@ predict_T_GPP_opriego <- function(
   GPP, GPP_sd, H, VPD, Tair, Pair, Q, Ca, ustar, u,
   # the following intermediates are independent of par and maybe precomputed
   config,
+  festimate_VPD = estimate_VPD_plant,
   ra = compute_aerodynamic_conductance(u, ustar),
   dens = calculate_air_density(Pair, Tair, config), # [kg m-3].
   VPD_plant = festimate_VPD(
@@ -303,6 +313,7 @@ predict_T_GPP_opriego <- function(
   chi = chi_o*(1/(1+beta*VPD_plant^0.5))
   transpiration_mod <- g_bulk$gw_bulk*VPD_plant/Pair*1000 ##<< [mmol H2O m-2 s-1]
   GPP_mod <- g_bulk$gc_bulk*Ca*(1-chi)
+  # T in mm/m2/s GPP in GPP_mod in ?umol CO2 m-2 s-1
   list(T = transpiration_mod, GPP = GPP_mod)
 }
 
@@ -333,7 +344,7 @@ estimate_VPD_plant <- function(
 ) {
   #--  plant temperature (Tplant) and plant to air vapor pressure deficit (VPD_plant)
   # Approximation of a surface temperature as canopy temperature (deg C)
-  Tplant <- (H*ra/(config$Cp*dens))+Tair
+  Tplant <- (H*ra$ra/(config$Cp*dens))+Tair
   # saturated vapor pressure deficit at the plant surface.
   es_plant <- 0.61078*exp((17.269*Tplant)/(237.3+ Tplant))
   # saturated vapor pressure deficit at the plant surface.
@@ -431,9 +442,10 @@ compute_stomatal_conductance_jarvis <- function(par, Q, VPD, Tair, gcmax) {
 #' @param ...           Further arguments to \code{predict_T_GPP_opriego}
 #'    such as a non-default \code{VPD_plant} or precomputed intermediates.
 #' @return vector of estimated transpiration for each record in data
+#'   in mm/hour (kg m^-2 hour^-1)
 #' @export
 predict_transpiration_opriego <- function(
-  data, par, chi_o, WUE_o
+  data, par, chi_o, WUE_o, config = priego_config()
   ,...
 ) {
   pred <- predict_T_GPP_opriego(
@@ -441,9 +453,10 @@ predict_transpiration_opriego <- function(
     GPP=data$GPP, GPP_sd=data$GPP_sd, H=data$H,
     VPD=data$VPD/10, Tair=data$Tair, Pair=data$Pair,
     Q=data$Q, Ca=data$Ca, ustar=data$ustar, u=data$u,
+    config = config,
     ...
   )
-  pred$T
+  pred$T * (18.01528/1e6)*3600  # from mmol m-2 s-2 to mm per hour
 }
 
 

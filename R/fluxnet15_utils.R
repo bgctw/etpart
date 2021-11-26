@@ -65,7 +65,8 @@ construct_data_FN15 = function(
     ) %>%
     mutate(
       timestamp = BerkeleyJulianDateToPOSIXct(TIMESTAMP_END) - 15*60
-      , ET = LE.to.ET(LE, Tair) * 60*30# from bigleaf convert mm/sec to mm/half-hour
+      #, ET = LE.to.ET(LE, Tair) * 60*30# from bigleaf convert mm/sec to mm/half-hour
+      , ET = LE.to.ET(LE, Tair) * 60*60# from bigleaf convert mm/sec to mm/half-hour
       , ET_sd = LE_sd * ET/LE
       #, NEE_sd = NEE_RANDUNC
       , RH = bigleaf::VPD.to.rH(VPD/10, Tair)

@@ -1,6 +1,7 @@
 .tmp.f <- function(){
   library(testthat)
   library(dplyr)
+  library(purrr)
 }
 
 # regression tests against commit 6dbac52 of
@@ -72,32 +73,47 @@ test_that("optimize_function",{
   tz = attr(FIHyy$timestamp, "tzone")
   dsf <-  filter(FIHyy, between(
     timestamp, ISOdatetime(2010,5,15,0,0,0,tz=tz), ISOdatetime(2010,5,19,0,0,0,tz=tz)))
+    # mutate(
+    #   GPP_sd = ifelse(is.na(.data$GPP_sd), .data$GPP*0.1,.data$GPP_sd),
+    #   Q = ifelse(is.na(.data$Q)==TRUE, .data$Rg*2, .data$Q)
+    # )
   ans <-  ETPart:::optim_priego(
-    dsf, chi_o = 0.88, WUE_o= 22.5,
-    config = priego_config(burninlength = 500, niter = 1000))
+    dsf, chi_o = 0.69, WUE_o= 9.03,
+    config = priego_config(burninlength = 1000, niter = 2000, updatecov = 250))
   expect_equal(length(ans$paropt), 4)
   # from ETpartitioning:
-  expect_equal( ans$paropt[1], c(a1=295), tolerance = 40)
+  ans$paropt
+  expect_equal( ans$paropt[1], c(a1=275), tolerance = 40)
+})
+
+test_that("predict_transpiration_opriego",{
+  tz = attr(FIHyy$timestamp, "tzone")
+  dsf <-  filter(FIHyy, between(
+    timestamp, ISOdatetime(2010,5,15,0,0,0,tz=tz), ISOdatetime(2010,5,19,0,0,0,tz=tz)))
+  paropt <- c(a1 = 254, Do = 0.269, Topt = 19.6, beta = 0.555)
+  transpiration_mod <- predict_transpiration_opriego(dsf, paropt, chi_o = 0.69, WUE_o= 9.03)
+  expect_equal(mean(transpiration_mod), 0.632, tolerance = 0.001)
 })
 
 test_that("5dayloop",{
   #tmp <-  FIHyy[ FIHyy$TIMESTAMP_START>  201105150000,]
   #tmp <-  tmp[tmp$TIMESTAMP_START<  201105160000,]
-  dsf <-  FIHyy[ FIHyy$TIMESTAMP_START > 201405150000,]
-  dsf <-  dsf[dsf$TIMESTAMP_START <=  201406150000,]
-  dsf <- dsf %>% mutate(
-    datetime = BerkeleyJulianDateToPOSIXct(.data$TIMESTAMP_END, "Etc/GMT+0"))
-  data <- dsf
-  lt  <- calculate_longterm_leaf(FIHyy, C = 1.1, Z = 0.2)
+  tz = attr(FIHyy$timestamp, "tzone")
+  lt  <- calculate_longterm_leaf(FIHyy, Z = 0.2)
+  data <-  filter(FIHyy, between(
+    timestamp, ISOdatetime(2010,5,15,0,0,0,tz=tz), ISOdatetime(2010,5,22,0,0,0,tz=tz)))
   data <- data %>%
     #filter(NIGHT == 0) %>%  # filter only during fitting
     # -1 to associate midnight to previous day
-    mutate(cumday = ETPart:::get_cumulative_day(datetime-1)) %>%
+    mutate(cumday = ETPart:::get_cumulative_day(timestamp-1)) %>%
     filter(cumday <= 6)
   dfans <- map_df(unique(data$cumday), function(iday){
     ETPart:::estimate_T_priego_5days(data, iday, lt$chi_o, lt$WUE_o)
   })
-  data %>% group_by(cumday) %>% mutate()
+  #expect_equal(nrow(dfans),nrow(data))
+  expect_equal(select(dfans, -T), data)
+  plot(T ~ ET, data=dfans, xlab="ET (mm/hour)"); abline(0,1)
+
 })
 
 

@@ -15,7 +15,7 @@ colspec <- do.call("cols_only", c(list(
 df0 <- read_csv(
   file.path("tmp","FIHyy.csv"), col_types = colspec, na = c("", "NA", "-9999"))
 
-FIHyy <- construct_data_FN15_(df0)
+FIHyy <- construct_data_FN15(df0)
 # df0 <- df0 %>% select(c("TIMESTAMP_END",berkeley_conv$filecolname))
 # names(df0)[-1] <- berkeley_conv$colname
 #

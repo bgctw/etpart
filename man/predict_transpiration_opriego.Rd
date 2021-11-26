@@ -4,7 +4,14 @@
 \alias{predict_transpiration_opriego}
 \title{Compute transpiration given optimized parameters}
 \usage{
-predict_transpiration_opriego(data, par, chi_o, WUE_o, ...)
+predict_transpiration_opriego(
+  data,
+  par,
+  chi_o,
+  WUE_o,
+  config = priego_config(),
+  ...
+)
 }
 \arguments{
 \item{data}{Data.frame with columns
@@ -32,6 +39,7 @@ such as a non-default \code{VPD_plant} or precomputed intermediates.}
 }
 \value{
 vector of estimated transpiration for each record in data
+?in mmol m-2 s-1
 }
 \description{
 Compute transpiration given optimized parameters
