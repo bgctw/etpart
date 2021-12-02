@@ -2,16 +2,9 @@
 % Please edit documentation in R/priego.R
 \name{predict_transpiration_opriego}
 \alias{predict_transpiration_opriego}
-\title{Compute transpiration given optimized parameters}
+\title{Compute transpiration given parameters}
 \usage{
-predict_transpiration_opriego(
-  data,
-  par,
-  chi_o,
-  WUE_o,
-  config = priego_config(),
-  ...
-)
+predict_transpiration_opriego(data, par, chi_o, WUE_o, ...)
 }
 \arguments{
 \item{data}{Data.frame with columns
@@ -28,19 +21,25 @@ predict_transpiration_opriego(
 \item u:       wind velocity (m s-1).
 }}
 
-\item{par}{optimized parameters see}
+\item{par}{optimized parameters see \code{\link{partition_priego}}}
 
 \item{chi_o}{Long-term effective chi}
 
 \item{WUE_o}{Long-term effective WUE}
 
 \item{...}{Further arguments to \code{predict_T_GPP_opriego}
-such as a non-default \code{VPD_plant} or precomputed intermediates.}
+such as \code{constants} (see \code{\link{etpart_constants}})
+or a non-default \code{VPD_plant} or
+precomputed intermediates.}
 }
 \value{
 vector of estimated transpiration for each record in data
-?in mmol m-2 s-1
+in mm/hour (kg m-2 hour-1)
 }
 \description{
-Compute transpiration given optimized parameters
+Compute transpiration given parameters
+}
+\seealso{
+\code{\link{partition_priego}},
+\code{\link{compute_stomatal_conductance_jarvis}}
 }

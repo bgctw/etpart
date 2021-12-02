@@ -2,7 +2,7 @@
 % Please edit documentation in R/priego.R
 \name{compute_stomatal_conductance_jarvis}
 \alias{compute_stomatal_conductance_jarvis}
-\title{Calculate stomatal conductance using Jarvis's approach.}
+\title{Canopy stomatal conductance by Jarvis.}
 \usage{
 compute_stomatal_conductance_jarvis(par, Q, VPD, Tair, gcmax)
 }
@@ -23,27 +23,32 @@ maximum conductance (m s-1 or mol m-2 s-1).}
 }
 \value{
 a numeric value:
-\item{compute_stomatal_conductance_jarvis}{canopy leaf conductance (untis refer to that given by gmax)}
+canopy leaf conductance (units refer to that given by gmax)
 }
 \description{
 Calculate canopy stomatal conductance using Jarvis's approach.
 }
 \details{
-the following metrics are calculated:\preformatted{       \deqn{compute_stomatal_conductance_jarvis <- gcmax*f(Q)*f(VPD)*f(Tair)}
-}
+the following metrics are calculated:
+
+\deqn{compute_stomatal_conductance_jarvis <- gcmax*f(Q)*f(VPD)*f(Tair)}
 }
 \examples{
- ## Selecting a single day (e.g. 15-05-2011)
- tmp <-  EddySample[ EddySample$TIMESTAMP_START>  201105150000,]
- tmp <-  tmp[tmp$TIMESTAMP_START<  201105160000,]
-compute_stomatal_conductance_jarvis(par=c(200, 0.2, 25)
-,Q = tmp$PPFD_IN * 2 #(convert to mumuol)
-,VPD = tmp$VPD_F
-,Tair = tmp$TA_F
+ ## Selecting a single day (e.g. 15-05-2010)
+tmp <- FIHyy[(FIHyy$timestamp > ISOdatetime(2010,5,15,0,0,0,tz=tz)) &
+             (FIHyy$timestamp <= ISOdatetime(2010,5,16,0,0,0,tz=tz)),]
+gc = compute_stomatal_conductance_jarvis(par=c(200, 0.2, 25)
+,Q = tmp$Q
+,VPD = tmp$VPD/10 # convert hPa to kPa
+,Tair = tmp$Tair
 ,gcmax = 1)
+plot(gc ~ tmp$timestamp)
 }
 \references{
 Perez-Priego, O., G. Katul, M. Reichstein et al. Partitioning eddy covariance
 water flux components using physiological and micrometeorological approaches,
 Journal of Geophysical Research: Biogeosciences. In press
+}
+\seealso{
+\code{\link{partition_priego}},
 }

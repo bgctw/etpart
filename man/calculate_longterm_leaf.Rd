@@ -2,30 +2,38 @@
 % Please edit documentation in R/priego.R
 \name{calculate_longterm_leaf}
 \alias{calculate_longterm_leaf}
-\title{"internal" leaf-to-ambient CO2 (chi_o) and Water use efficiency (WUE_o)}
+\title{leaf-to-ambient CO2 ratio (chi_o) and Water use efficiency (WUE_o)}
 \usage{
-calculate_longterm_leaf(data, Z, C = config$C, config = priego_config())
+calculate_longterm_leaf(
+  data,
+  altitude,
+  C = config$C,
+  config = priego_config(),
+  constants = etpart_constants()
+)
 }
 \arguments{
-\item{data}{Data.frame or matrix containing all variables.
+\item{data}{Data.frame with columns
 \itemize{
 \item GPP: photosynthesis (umol CO2 m-2 s-1)
 \item VPD: vapor pressure deficit (kPa).
 \item Tair: air temperature (deg C).
 }}
 
-\item{Z}{Z- numeric value defining elevation (km).}
-
 \item{C}{Empirical coeficient for C3 species.
 (see Wang et al., 2017; Plant Nature)}
+
+\item{constants}{physical constants, see \code{\link{etpart_constants}}}
+
+\item{Z}{Z- numeric value defining elevation (km).}
 }
 \value{
 list with numeric entries:
 \item{chi_o}{long-term effective "internal" leaf-to-ambient CO2 (unitless)}
-\item{WUE_o}{long-term effective "Water use efficiency (umolCO2 mmol-1)}
+\item{WUE_o}{long-term effective Water use efficiency (umolCO2 mmol-1)}
 }
 \description{
-Calculation of long-term effective "internal"
+Calculate long-term effective "internal"
 leaf-to-ambient CO2 (chi_o) and Water use efficiency (WUE_o)
 }
 \details{
@@ -39,11 +47,11 @@ WUE_o:
 
 \deqn{WUE_o <- (390*(1-chi_o)*96)/(1.6*VPD_g)*0.001}
 
-Tair_g and VPD_g are calculated based on the mean value of the growing period.
+\code{Tair_g} and \code{VPD_g} are calculated based on the mean value of the growing period.
 The growing period is estimated as those periods over the 85 quantile of GPP.
 }
 \examples{
-calculate_chi_o(EddySample)
+calculate_longterm_leaf(FIHyy, Z=0.060)
 }
 \references{
 Wang, H., I. C. Prentice, et al., (2017), Towards a universal model

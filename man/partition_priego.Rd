@@ -2,39 +2,37 @@
 % Please edit documentation in R/priego.R
 \name{partition_priego}
 \alias{partition_priego}
-\title{Model optimization routine}
+\title{partition ET by Priego approach}
 \usage{
-partition_priego(data, config = priego_config(), ...)
+partition_priego(data, ...)
 }
 \arguments{
-\item{data}{Data.frame with variables.
+\item{data}{Data.frame with variables;
 \itemize{
 \item those required by \code{\link{predict_transpiration_opriego}} and
 \item Rg: incoming short-wave radiation (W m-2).
 }}
 
-\item{control}{list with configuration options see \code{\link{priego_config}}}
-
-\item{chi_o}{Long-term effective chi}
-
-\item{WUE_o}{Long-term effective WUE}
+\item{...}{further arguments passed to both
+\code{\link{calculate_longterm_leaf}}
+and  \code{\link{predict_transpiration_opriego}}
+such as \code{config=\link{priego_config}()} and
+\code{constants=\link{etpart_constants}()}}
 }
 \value{
-a numeric vector containing 4 optimal parameters (a1,Do,To,beta):
+data with updated or added columns T and E in mm/hour.
 }
 \description{
-Routine to estimate optimal parameters of a photosynthesis model
-using a multi-constraint Markov Chain Monte Carlo (MCMC)
+Model transpiration by optimizing short-term adaptation of ratio of leaf
+internal to ambiant CO2 concentration.
 (see Perez-Priego et al., 2018).
 }
 \details{
-partition ET by Priego approach
-
 For each five-day window the short-term variation in leaf-internal
 water to CO2 ratio (chi) and the modifiers for photosynthesis fitted so to
 minimize not only the mismatch between observed and modeled GPP but
 also the unit cost of transpiration.
-The transpiration cost is speciied  by introducing a conditional factor
+The transpiration cost is specified  by introducing a conditional factor
 demand (phi), which invokes the optimality hypothesis.
 The phi term is to be defined as the integrated cost of transpiration
 (i.e. transpiration_mod/photos_mod) over a time period (5 days) normalized
@@ -46,14 +44,14 @@ Evaporation is computed as difference to ET from eddy-covariance.
 
 The multi-objective function is defined as:
 
-\deqn{OF <- sum((photos-photosy_mod)/photos_unc)^2)/n + phi}
+\deqn{OF = sum((photos-photos_{mod})/photos_{unc})\^2)/n + phi}
 
 where phi invokes optimality theory by minimizing the following term
 
-\deqn{phi <- (sum(transpiration_mod)/sum(photos_mod)*WUE_o}
+\deqn{phi = (sum(transpiration_mod)/sum(photos_mod)*WUE_o}
 
 The 4 model parameters (a1, Do, Topt and beta, see Perez-Priego 2018) are
-\itemize{
+\describe{
 \item{a1}{radiation curvature}
 \item{D0}{empirical coef. related to response of stomatal closure to VPD.}
 \item{Topt}{optimum temperature}
@@ -68,4 +66,10 @@ Journal of Geophysical Research: Biogeosciences. In press
 Reichstein, M., et al. (2005), On the separation of net ecosystem exchange
 into assimilation and ecosystem respiration: review and improved algorithm,
 Global Change Biology, 11(9), 1424-1439.
+}
+\seealso{
+\code{\link{calculate_longterm_leaf}},
+\code{\link{predict_transpiration_opriego}},
+\code{\link{priego_config}},
+\code{\link{etpart_constants}}
 }

@@ -11,10 +11,7 @@ priego_config(
   niter = 2000,
   updatecov = 200,
   ntrydr = 1,
-  burninlength = 600,
-  Cp = 1003.5,
-  R_gas_constant = 0.287058,
-  M_air = 0.0289644
+  burninlength = 600
 )
 }
 \arguments{
@@ -35,16 +32,13 @@ to update the MCMC jumps.}
 \item{ntrydr}{maximal number of tries for the delayed rejection procedure}
 
 \item{burninlength}{number of initial iterations to be removed from output.}
-
-\item{Cp}{heat capacity \link{J kg-1 K-1}}
-
-\item{R_gas_constant}{\link{J kg-1 deg K-1}}
-
-\item{M_air}{molar mass of air, \link{kg mol-1}}
 }
 \value{
 a list with above arguments as entries.
 }
 \description{
 Configure parameters of the Priego transpiration partitioning
+}
+\seealso{
+\code{\link{partition_priego}}
 }

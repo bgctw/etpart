@@ -77,6 +77,7 @@ test_that("optimize_function",{
     #   GPP_sd = ifelse(is.na(.data$GPP_sd), .data$GPP*0.1,.data$GPP_sd),
     #   Q = ifelse(is.na(.data$Q)==TRUE, .data$Rg*2, .data$Q)
     # )
+  cfg = priego_config()
   ans <-  ETPart:::optim_priego(
     dsf, chi_o = 0.69, WUE_o= 9.03,
     config = priego_config(burninlength = 1000, niter = 2000, updatecov = 250))
@@ -91,8 +92,10 @@ test_that("predict_transpiration_opriego",{
   dsf <-  filter(FIHyy, between(
     timestamp, ISOdatetime(2010,5,15,0,0,0,tz=tz), ISOdatetime(2010,5,19,0,0,0,tz=tz)))
   paropt <- c(a1 = 254, Do = 0.269, Topt = 19.6, beta = 0.555)
-  transpiration_mod <- predict_transpiration_opriego(dsf, paropt, chi_o = 0.69, WUE_o= 9.03)
-  expect_equal(mean(transpiration_mod), 0.632, tolerance = 0.001)
+  transpiration_mod <- predict_transpiration_opriego(
+    dsf, paropt, chi_o = 0.69, WUE_o= 9.03)
+  # regression to previous value
+  expect_equal(mean(transpiration_mod), 0.041, tolerance = 0.001)
 })
 
 test_that("5dayloop",{
@@ -107,13 +110,15 @@ test_that("5dayloop",{
     # -1 to associate midnight to previous day
     mutate(cumday = ETPart:::get_cumulative_day(timestamp-1)) %>%
     filter(cumday <= 6)
+  cfg = priego_config(niter = 500, burninlength = 400, updatecov = 100)
   dfans <- map_df(unique(data$cumday), function(iday){
-    ETPart:::estimate_T_priego_5days(data, iday, lt$chi_o, lt$WUE_o)
+    ETPart:::estimate_T_priego_5days(data, iday, lt$chi_o, lt$WUE_o, config = cfg)
   })
   #expect_equal(nrow(dfans),nrow(data))
   expect_equal(select(dfans, -T), data)
-  plot(T ~ ET, data=dfans, xlab="ET (mm/hour)"); abline(0,1)
-
+  #plot(T ~ ET, data=dfans, xlab="ET (mm/hour)"); abline(0,1)
+  # regression to previous value: same magnitude
+  expect_equal(coef(lm(T~ET,data=dfans))["ET"], c(ET=0.5), tolerance= 0.1)
 })
 
 

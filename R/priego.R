@@ -4,28 +4,27 @@
 
 #' partition ET by Priego approach
 #'
-#' @param data data.frame with required columns: XX
-#' @param control list with configuration options see \code{\link{priego_config}}
-#' @title  Model optimization routine
-#'
-#' @description Routine to estimate optimal parameters of a photosynthesis model
-#'   using a multi-constraint Markov Chain Monte Carlo (MCMC)
+#' Model transpiration by optimizing short-term adaptation of ratio of leaf
+#' internal to ambiant CO2 concentration.
 #'   (see Perez-Priego et al., 2018).
 #'
-#' @param data          Data.frame with variables.
+#' @param data          Data.frame with variables;
 #' \itemize{
 #'    \item those required by \code{\link{predict_transpiration_opriego}} and
 #'    \item Rg: incoming short-wave radiation (W m-2).
-#' }
-#' @param chi_o         Long-term effective chi
-#' @param WUE_o         Long-term effective WUE
+#'    }
+#' @param ...   further arguments passed to both
+#'    \code{\link{calculate_longterm_leaf}}
+#'    and  \code{\link{predict_transpiration_opriego}}
+#'    such as \code{config=\link{priego_config}()} and
+#'    \code{constants=\link{etpart_constants}()}
 #'
 #' @details
 #' For each five-day window the short-term variation in leaf-internal
 #' water to CO2 ratio (chi) and the modifiers for photosynthesis fitted so to
 #'   minimize not only the mismatch between observed and modeled GPP but
 #'   also the unit cost of transpiration.
-#'   The transpiration cost is speciied  by introducing a conditional factor
+#'   The transpiration cost is specified  by introducing a conditional factor
 #'   demand (phi), which invokes the optimality hypothesis.
 #'   The phi term is to be defined as the integrated cost of transpiration
 #'   (i.e. transpiration_mod/photos_mod) over a time period (5 days) normalized
@@ -37,21 +36,27 @@
 #'
 #' The multi-objective function is defined as:
 #'
-#'  \deqn{OF <- sum((photos-photosy_mod)/photos_unc)^2)/n + phi}
+#'  \deqn{OF = sum((photos-photos_{mod})/photos_{unc})\^2)/n + phi}
 #'
 #'  where phi invokes optimality theory by minimizing the following term
 #'
-#'  \deqn{phi <- (sum(transpiration_mod)/sum(photos_mod)*WUE_o}
+#'  \deqn{phi = (sum(transpiration_mod)/sum(photos_mod)*WUE_o}
 #'
 #' The 4 model parameters (a1, Do, Topt and beta, see Perez-Priego 2018) are
-#'   \itemize{
+#'  \describe{
 #'  \item{a1}{radiation curvature}
 #'  \item{D0}{empirical coef. related to response of stomatal closure to VPD.}
 #'  \item{Topt}{optimum temperature}
 #'  \item{beta}{A plant state variable defining the carbon cost of water.}
 #'   }
 #'
-#' @return a numeric vector containing 4 optimal parameters (a1,Do,To,beta):
+#' @seealso
+#' \code{\link{calculate_longterm_leaf}},
+#' \code{\link{predict_transpiration_opriego}},
+#' \code{\link{priego_config}},
+#' \code{\link{etpart_constants}}
+#'
+#' @return data with updated or added columns T and E in mm/hour.
 #'
 #' @references
 #' Perez-Priego, O., G. Katul, M. Reichstein et al. Partitioning eddy covariance
@@ -61,13 +66,10 @@
 #' Reichstein, M., et al. (2005), On the separation of net ecosystem exchange
 #' into assimilation and ecosystem respiration: review and improved algorithm,
 #' Global Change Biology, 11(9), 1424-1439.
-#' @importFrom stats median
-#' @importFrom FME Latinhyper
-#' @importFrom  FME modMCMC
 #' @export
-partition_priego <- function(data, config = priego_config(), ...) {
-  lt <- calculate_longterm_leaf(data, ..., config = config)
-  dfT <- estimate_T_priego_5days(data, lt$chi_o, lt$WUE_o, ..., config = config)
+partition_priego <- function(data, ...) {
+  lt <- calculate_longterm_leaf(data, ...)
+  dfT <- estimate_T_priego_5days(data, lt$chi_o, lt$WUE_o, ...)
   dfT %>% mutate(E = ET - T)
 }
 
@@ -78,9 +80,6 @@ partition_priego <- function(data, config = priego_config(), ...) {
 #' @param par_upper     A vector containing the upper bound of the parameters
 #'   (a1,Do,To,beta)
 #' @param C Empirical coeficient for C3 species (see Wang et al., 2017; Plant Nature).
-#' @param Cp heat capacity [J kg-1 K-1]
-#' @param R_gas_constant [J kg-1 deg K-1]
-#' @param M_air molar mass of air, [kg mol-1]
 #' @param niter number of iterations for the MCMC
 #' @param updatecov number of iterations after which the parameter covariance
 #'    matrix is (re)evaluated based on the parameters kept thus far, and used
@@ -89,6 +88,7 @@ partition_priego <- function(data, config = priego_config(), ...) {
 #' @param burninlength number of initial iterations to be removed from output.
 #'
 #' @return a list with above arguments as entries.
+#' @seealso \code{\link{partition_priego}}
 #' @export
 priego_config <- function(
   C = 1.189,
@@ -98,10 +98,7 @@ priego_config <- function(
   niter = 2000,
   updatecov = 200,
   ntrydr = 1,
-  burninlength = 600,
-  Cp = 1003.5,
-  R_gas_constant = 0.287058,
-  M_air = 0.0289644
+  burninlength = 600
 ) {
   list(
     C = C,
@@ -110,20 +107,16 @@ priego_config <- function(
     niter = niter,
     updatecov = updatecov,
     ntrydr = ntrydr,
-    burninlength = burninlength,
-    Cp = Cp,
-    R_gas_constant = R_gas_constant,
-    M_air = M_air
+    burninlength = burninlength
   )
 }
 
-
-#' @title "internal" leaf-to-ambient CO2 (chi_o) and Water use efficiency (WUE_o)
+#' leaf-to-ambient CO2 ratio (chi_o) and Water use efficiency (WUE_o)
 #'
-#' @description Calculation of long-term effective "internal"
+#' Calculate long-term effective "internal"
 #'    leaf-to-ambient CO2 (chi_o) and Water use efficiency (WUE_o)
 #'
-#' @param data      Data.frame or matrix containing all variables.
+#' @param data      Data.frame with columns
 #' \itemize{
 #'    \item GPP: photosynthesis (umol CO2 m-2 s-1)
 #'    \item VPD: vapor pressure deficit (kPa).
@@ -132,9 +125,8 @@ priego_config <- function(
 #' @param Z         Z- numeric value defining elevation (km).
 #' @param C         Empirical coeficient for C3 species.
 #'   (see Wang et al., 2017; Plant Nature)
-
-#' @export
-#' @importFrom stats quantile
+#' @param constants physical constants, see \code{\link{etpart_constants}}
+#'
 #' @details the following metrics are calculated:
 #'
 #' chi_o:
@@ -145,12 +137,12 @@ priego_config <- function(
 #'
 #'   \deqn{WUE_o <- (390*(1-chi_o)*96)/(1.6*VPD_g)*0.001}
 #'
-#' Tair_g and VPD_g are calculated based on the mean value of the growing period.
+#' \code{Tair_g} and \code{VPD_g} are calculated based on the mean value of the growing period.
 #' The growing period is estimated as those periods over the 85 quantile of GPP.
 #'
 #' @return list with numeric entries:
 #' \item{chi_o}{long-term effective "internal" leaf-to-ambient CO2 (unitless)}
-#' \item{WUE_o}{long-term effective "Water use efficiency (umolCO2 mmol-1)}
+#' \item{WUE_o}{long-term effective Water use efficiency (umolCO2 mmol-1)}
 #'
 #' @references
 #' Wang, H., I. C. Prentice, et al., (2017), Towards a universal model
@@ -161,12 +153,15 @@ priego_config <- function(
 #' Global Change Biology, 11(9), 1424-1439.
 #'
 #' @examples
-#' calculate_chi_o(EddySample)
+#' calculate_longterm_leaf(FIHyy, Z=0.060)
+#' @export
+#' @importFrom stats quantile
 calculate_longterm_leaf <- function(
   data
-  ,Z
+  ,altitude
   ,C = config$C
   ,config = priego_config()
+  ,constants = etpart_constants()
 ) {
   check_required_cols(data, c("GPP","VPD","Tair"))
   dsagg <- data %>%
@@ -174,15 +169,17 @@ calculate_longterm_leaf <- function(
     # Defining optimal growing period according to quantiles of photosynthesis
     filter(GPP >  quantile(GPP, probs = 0.85, na.rm=T)) %>%
     summarize(
-      Tair_g = mean(Tair, na.rm = TRUE), VPD_g = mean(VPD_kPa, na.rm = TRUE))
-  logistic_chi_o = 0.0545*(dsagg$Tair_g-25)-0.58*log(dsagg$VPD_g)-0.0815*Z+C
+      Tair = mean(Tair, na.rm = TRUE), VPD = mean(VPD_kPa, na.rm = TRUE))
+  logistic_chi_o = 0.0545*(dsagg$Tair-25)-0.58*log(dsagg$VPD)-0.0815*altitude+C
   chi_o <- exp(logistic_chi_o)/(1+exp(logistic_chi_o)) # Longterm effective CiCa
   ## 0.001 to convert umol/mol into umol/mmol
-  WUE_o <- (390*(1-chi_o)*96)/(1.6*dsagg$VPD_g)*0.001
+  WUE_o <- (390*(1-chi_o)*96)/(1.6*dsagg$VPD)*0.001
   list(chi_o = chi_o, WUE_o = WUE_o)
 }
 
-estimate_T_priego_5days <- function(data, iday, chi_o, WUE_o, ...) {
+estimate_T_priego_5days <- function(
+  data, iday, chi_o, WUE_o, config = priego_config(), ...
+) {
   ds5 <- filter(data, between(cumday, iday - 2, iday + 2))
   popt <- ds5 %>%
     # better do inside optim_priego
@@ -190,36 +187,40 @@ estimate_T_priego_5days <- function(data, iday, chi_o, WUE_o, ...) {
     #   GPP_sd = ifelse(is.na(.data$GPP_sd), .data$GPP*0.1,.data$GPP_sd),
     #   Q = ifelse(is.na(.data$Q)==TRUE, .data$Rg*2,  .data$Q)
     # ) %>%
-    optim_priego(chi_o, WUE_o, ...)
+    optim_priego(chi_o, WUE_o, config=config, ...)
   ans <- ds5 %>%
     filter(cumday == iday) %>%
     mutate(T = predict_transpiration_opriego(.data, popt$paropt, chi_o, WUE_o, ...))
 }
 
 
+#' @importFrom stats median
+#' @importFrom FME Latinhyper
+#' @importFrom  FME modMCMC
 optim_priego <- function(data, chi_o, WUE_o
-     ,config = priego_config()
+     ,config = priego_config(), constants = etpart_constants()
 ){
   dsf = data %>%
-    filter(!isnight & GPP>0 & Q>0 & Rg>0) %>% # Rejecting bad data and filtering for daytime data
+    # Rejecting bad data and filtering for daytime data
+    filter(!isnight & GPP>0 & Q>0 & Rg>0) %>%
     mutate(
       VPD_kPa = VPD/10, # Convert VPD units (hPa -> kPa)
       #If PAR is not provided we use SW_in instead as an approximation of PAR
       # *2: conversion factor between W m2 to umol m-2 s-1
       Q = ifelse(is.na(Q), Rg*2, Q),
-      #landa = (3147.5-2.37*(Tair+273.15))*1000 # Latent heat of evaporisation [J kg-1]
+      #landa = (3147.5-2.37*(Tair+273.15))*1000 # Latent heat of evaporation [J kg-1]
       GPP_sd = ifelse(is.na(.data$GPP_sd), .data$GPP*0.1, .data$GPP_sd),
     )
   pars <- Latinhyper(cbind(config$par_lower,config$par_upper),num = 1)
   # try computing all that does not depend on parameters once outside cost
   ra <- compute_aerodynamic_conductance(dsf$u, dsf$ustar)
-  dens = calculate_air_density(dsf$Pair, dsf$Tair, config) # [kg m-3].
-  Mden = dens/config$M_air ##<< molar air density [mol m-3].
+  dens = calculate_air_density(dsf$Pair, dsf$Tair, constants) # [kg m-3].
+  Mden = dens/constants$M_air ##<< molar air density [mol m-3].
   GPP_max = quantile(dsf$GPP, probs=c(0.90), na.rm=T)
   Dmax = mean(dsf$VPD_kPa[dsf$GPP>GPP_max], na.rm=T)
   GPP_sd_threshold = pmax(dsf$GPP*0.1, dsf$GPP_sd)
   # VPD_plant = estimate_VPD_plant(
-  #   H=H, Tair=Tair, Pair=Pair, VPD=VPD_kPa, ra=ra, config=config, dens=dens)
+  #   H=H, Tair=Tair, Pair=Pair, VPD=VPD_kPa, ra=ra, constants=constants, dens=dens)
   VPD_plant = dsf$VPD_kPa
   min.RSS <- function(p) cost_optim_opriego(
     p, chi_o, WUE_o,
@@ -233,6 +234,7 @@ optim_priego <- function(data, chi_o, WUE_o
     Ca = dsf$Ca,
     ustar = dsf$ustar,
     u = dsf$u,
+    constants = NULL, # actually never used because of precomputations
     ra = ra, VPD_plant = VPD_plant,
     Mden = Mden, GPP_max = GPP_max, Dmax = Dmax,
     GPP_sd_threshold = GPP_sd_threshold
@@ -254,8 +256,8 @@ optim_priego <- function(data, chi_o, WUE_o
   list(paropt = paropt, parMCMC = parMCMC)
 }
 
-calculate_air_density <- function(Pair, Tair, config) {
-  dens = Pair/(config$R_gas_constant*(Tair+273.15))
+calculate_air_density <- function(Pair, Tair, constants=etpart_constants()) {
+  dens = Pair/(constants$R_gas_constant*(Tair+273.15))
 }
 
 compute_aerodynamic_conductance <- function(u,ustar) {
@@ -271,7 +273,7 @@ compute_aerodynamic_conductance <- function(u,ustar) {
 cost_optim_opriego <- function(par, chi_o, WUE_o,
   GPP, GPP_sd, H, VPD, Tair, Pair, Q, Ca, ustar, u,
   # need supply the arguments below for performance, see optim_priego
-  config,
+  constants,
   ra, VPD_plant,
   Mden, GPP_max, Dmax, GPP_sd_threshold
   ) {
@@ -279,7 +281,7 @@ cost_optim_opriego <- function(par, chi_o, WUE_o,
   pred <- predict_T_GPP_opriego(
     par, chi_o, WUE_o,
     GPP, GPP_sd, H, VPD, Tair, Pair, Q, Ca, ustar, u,
-    config,
+    constants,
     estimate_VPD_eddy,
     ra, dens=NULL, VPD_plant,
     Mden, GPP_max, Dmax, GPP_sd_threshold
@@ -294,13 +296,13 @@ predict_T_GPP_opriego <- function(
   par, chi_o, WUE_o,
   GPP, GPP_sd, H, VPD, Tair, Pair, Q, Ca, ustar, u,
   # the following intermediates are independent of par and maybe precomputed
-  config,
+  constants = etpart_constants(),
   festimate_VPD = estimate_VPD_plant,
   ra = compute_aerodynamic_conductance(u, ustar),
-  dens = calculate_air_density(Pair, Tair, config), # [kg m-3].
+  dens = calculate_air_density(Pair, Tair, constants), # [kg m-3].
   VPD_plant = festimate_VPD(
-    H=H, Tair=Tair, Pair=Pair, VPD=VPD, ra=ra, config=config, dens=dens),
-  Mden = dens/config$M, ##<< molar air density [mol m-3].
+    H=H, Tair=Tair, Pair=Pair, VPD=VPD, ra=ra, constants=constants, dens=dens),
+  Mden = dens/constants$M, ##<< molar air density [mol m-3].
   GPP_max = quantile(GPP, probs=c(0.90), na.rm=T),
   Dmax = mean(VPD[GPP>GPP_max], na.rm=T),
   GPP_sd_threshold = ifelse(
@@ -339,12 +341,12 @@ estimate_canopy_conductances <- function(
 
 
 estimate_VPD_plant <- function(
-  H, Tair, Pair, VPD, ra, config,
-  dens = Pair/(config$R_gas_constant*(Tair+273.15)) # Air density [kg m-3].
+  H, Tair, Pair, VPD, ra, constants,
+  dens = Pair/(constants$R_gas_constant*(Tair+273.15)) # Air density [kg m-3].
 ) {
   #--  plant temperature (Tplant) and plant to air vapor pressure deficit (VPD_plant)
   # Approximation of a surface temperature as canopy temperature (deg C)
-  Tplant <- (H*ra$ra/(config$Cp*dens))+Tair
+  Tplant <- (H*ra$ra/(constants$Cp*dens))+Tair
   # saturated vapor pressure deficit at the plant surface.
   es_plant <- 0.61078*exp((17.269*Tplant)/(237.3+ Tplant))
   # saturated vapor pressure deficit at the plant surface.
@@ -355,14 +357,14 @@ estimate_VPD_plant <- function(
   VPD_plant <- es_plant-ea
 }
 estimate_VPD_eddy <- function(
-  H, Tair, Pair, VPD, ra, config,
-  dens = Pair/(config$R_gas_constant*(Tair+273.15)) # Air density [kg m-3].
+  H, Tair, Pair, VPD, ra, constants,
+  dens = Pair/(constants$R_gas_constant*(Tair+273.15)) # Air density [kg m-3].
 ) { VPD }
 
 
-#' @title Calculate stomatal conductance using Jarvis's approach.
+#' Canopy stomatal conductance by Jarvis.
 #'
-#' @description Calculate canopy stomatal conductance using Jarvis's approach.
+#' Calculate canopy stomatal conductance using Jarvis's approach.
 #'
 #' @param par       Set of parameter for the respective sensitivity function.
 #' @param Q         Vector containing time series of
@@ -374,30 +376,33 @@ estimate_VPD_eddy <- function(
 #' @param gcmax     Empirical parameter defining
 #'   maximum conductance (m s-1 or mol m-2 s-1).
 #'
-#' @export
 #' @details the following metrics are calculated:
 #'
-#'            \deqn{compute_stomatal_conductance_jarvis <- gcmax*f(Q)*f(VPD)*f(Tair)}
+#'\deqn{compute_stomatal_conductance_jarvis <- gcmax*f(Q)*f(VPD)*f(Tair)}
 #'
 #'
 #' @return a numeric value:
-#'         \item{compute_stomatal_conductance_jarvis}{canopy leaf conductance (untis refer to that given by gmax)}
+#' canopy leaf conductance (units refer to that given by gmax)
 #'
+#' @references
+#' Perez-Priego, O., G. Katul, M. Reichstein et al. Partitioning eddy covariance
+#' water flux components using physiological and micrometeorological approaches,
+#' Journal of Geophysical Research: Biogeosciences. In press
 #'
-#' @references Perez-Priego, O., G. Katul, M. Reichstein et al. Partitioning eddy covariance
-#'             water flux components using physiological and micrometeorological approaches,
-#'             Journal of Geophysical Research: Biogeosciences. In press
-#'
+#' @seealso
+#'   \code{\link{partition_priego}},
 #'
 #' @examples
-#'  ## Selecting a single day (e.g. 15-05-2011)
-#'  tmp <-  EddySample[ EddySample$TIMESTAMP_START>  201105150000,]
-#'  tmp <-  tmp[tmp$TIMESTAMP_START<  201105160000,]
-#' compute_stomatal_conductance_jarvis(par=c(200, 0.2, 25)
-#' ,Q = tmp$PPFD_IN * 2 #(convert to mumuol)
-#' ,VPD = tmp$VPD_F
-#' ,Tair = tmp$TA_F
+#'  ## Selecting a single day (e.g. 15-05-2010)
+#' tmp <- FIHyy[(FIHyy$timestamp > ISOdatetime(2010,5,15,0,0,0,tz=tz)) &
+#'              (FIHyy$timestamp <= ISOdatetime(2010,5,16,0,0,0,tz=tz)),]
+#' gc = compute_stomatal_conductance_jarvis(par=c(200, 0.2, 25)
+#' ,Q = tmp$Q
+#' ,VPD = tmp$VPD/10 # convert hPa to kPa
+#' ,Tair = tmp$Tair
 #' ,gcmax = 1)
+#' plot(gc ~ tmp$timestamp)
+#' @export
 compute_stomatal_conductance_jarvis <- function(par, Q, VPD, Tair, gcmax) {
   #-- Fitting parameters
   a1 <- par[1] ##<< radiation curvature
@@ -420,10 +425,9 @@ compute_stomatal_conductance_jarvis <- function(par, Q, VPD, Tair, gcmax) {
   gcmax*sensitivity_function_scaled
 }
 
-
-#' Compute transpiration given optimized parameters
+#' Compute transpiration given parameters
 #'
-#' @param par optimized parameters see
+#' @param par optimized parameters see \code{\link{partition_priego}}
 #' @param data          Data.frame with columns
 #' \itemize{
 #'   \item GPP:     photosynthesis data (umol CO2 m-2 s-1).
@@ -440,20 +444,25 @@ compute_stomatal_conductance_jarvis <- function(par, Q, VPD, Tair, gcmax) {
 #' @param chi_o         Long-term effective chi
 #' @param WUE_o         Long-term effective WUE
 #' @param ...           Further arguments to \code{predict_T_GPP_opriego}
-#'    such as a non-default \code{VPD_plant} or precomputed intermediates.
+#'    such as \code{constants} (see \code{\link{etpart_constants}})
+#'    or a non-default \code{VPD_plant} or
+#'    precomputed intermediates.
 #' @return vector of estimated transpiration for each record in data
-#'   in mm/hour (kg m^-2 hour^-1)
+#'   in mm/hour (kg m-2 hour-1)
+#' @seealso
+#'   \code{\link{partition_priego}},
+#'   \code{\link{compute_stomatal_conductance_jarvis}}
 #' @export
 predict_transpiration_opriego <- function(
-  data, par, chi_o, WUE_o, config = priego_config()
-  ,...
+  data, par, chi_o, WUE_o, ...
 ) {
+  check_required_cols(
+    data, c("GPP","GPP_sd","H","VPD","Tair","Pair","Q","Ca","ustar","u"))
   pred <- predict_T_GPP_opriego(
     par, chi_o, WUE_o,
     GPP=data$GPP, GPP_sd=data$GPP_sd, H=data$H,
     VPD=data$VPD/10, Tair=data$Tair, Pair=data$Pair,
     Q=data$Q, Ca=data$Ca, ustar=data$ustar, u=data$u,
-    config = config,
     ...
   )
   pred$T * (18.01528/1e6)*3600  # from mmol m-2 s-2 to mm per hour
