@@ -20,12 +20,15 @@ calculate_longterm_leaf(
 \item Tair: air temperature (deg C).
 }}
 
+\item{altitude}{numeric value defining elevation (m).}
+
 \item{C}{Empirical coeficient for C3 species.
 (see Wang et al., 2017; Plant Nature)}
 
-\item{constants}{physical constants, see \code{\link{etpart_constants}}}
+\item{config}{configuration (\code{\link{priego_config}})
+with entry C for default of argument C}
 
-\item{Z}{Z- numeric value defining elevation (km).}
+\item{constants}{physical constants, see \code{\link{etpart_constants}}}
 }
 \value{
 list with numeric entries:
@@ -51,7 +54,7 @@ WUE_o:
 The growing period is estimated as those periods over the 85 quantile of GPP.
 }
 \examples{
-calculate_longterm_leaf(FIHyy, Z=0.060)
+calculate_longterm_leaf(FIHyy, altitude=60)
 }
 \references{
 Wang, H., I. C. Prentice, et al., (2017), Towards a universal model

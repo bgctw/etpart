@@ -15,7 +15,7 @@ test_that("calculate_longterm_leaf with wrong column names",{
 })
 
 test_that("calculate_longterm_leaf",{
-  lt  <- calculate_longterm_leaf(FIHyy, C = 1.189, Z = 0.27)
+  lt  <- calculate_longterm_leaf(FIHyy, C = 1.189, altitude = 270)
   # regression to values from ETpartitioningTutorial
   expect_equal( lt$chi_o, 0.69, tolerance = 0.01 )
   expect_equal( lt$WUE_o, 9.03, tolerance = 0.01 )
@@ -77,15 +77,19 @@ test_that("optimize_function",{
     #   GPP_sd = ifelse(is.na(.data$GPP_sd), .data$GPP*0.1,.data$GPP_sd),
     #   Q = ifelse(is.na(.data$Q)==TRUE, .data$Rg*2, .data$Q)
     # )
-  cfg = priego_config()
-  ans <-  ETPart:::optim_priego(
-    dsf, chi_o = 0.69, WUE_o= 9.03,
-    config = priego_config(burninlength = 1000, niter = 2000, updatecov = 250))
+  cfg = priego_config(burninlength = 1000, niter = 2000, updatecov = 250)
+  ans <-  ETPart:::optim_priego(dsf, chi_o = 0.69, WUE_o= 9.03, config = cfg)
   expect_equal(length(ans$paropt), 4)
-  # from ETpartitioning:
+  # from oscarperezpriego/ETpartitioning:
   ans$paropt
   expect_equal( ans$paropt[1], c(a1=275), tolerance = 40)
 })
+
+.tmp.f <- function(){
+  cfg = priego_config(burninlength = 1000, niter = 5000, updatecov = 250)
+  ans <-  ETPart:::optim_priego(dsf, chi_o = 0.69, WUE_o= 9.03, config = cfg)
+  plot(ans$parMCMC)
+}
 
 test_that("predict_transpiration_opriego",{
   tz = attr(FIHyy$timestamp, "tzone")
@@ -102,7 +106,7 @@ test_that("5dayloop",{
   #tmp <-  FIHyy[ FIHyy$TIMESTAMP_START>  201105150000,]
   #tmp <-  tmp[tmp$TIMESTAMP_START<  201105160000,]
   tz = attr(FIHyy$timestamp, "tzone")
-  lt  <- calculate_longterm_leaf(FIHyy, Z = 0.2)
+  lt  <- calculate_longterm_leaf(FIHyy, altitude = 200)
   data <-  filter(FIHyy, between(
     timestamp, ISOdatetime(2010,5,15,0,0,0,tz=tz), ISOdatetime(2010,5,22,0,0,0,tz=tz)))
   data <- data %>%
@@ -111,7 +115,7 @@ test_that("5dayloop",{
     mutate(cumday = ETPart:::get_cumulative_day(timestamp-1)) %>%
     filter(cumday <= 6)
   cfg = priego_config(niter = 500, burninlength = 400, updatecov = 100)
-  dfans <- map_df(unique(data$cumday), function(iday){
+  dfans <- map_dfr(unique(data$cumday), function(iday){
     ETPart:::estimate_T_priego_5days(data, iday, lt$chi_o, lt$WUE_o, config = cfg)
   })
   #expect_equal(nrow(dfans),nrow(data))

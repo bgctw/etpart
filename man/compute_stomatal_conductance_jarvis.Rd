@@ -35,6 +35,7 @@ the following metrics are calculated:
 }
 \examples{
  ## Selecting a single day (e.g. 15-05-2010)
+tz <- get_tzone(FIHyy$timestamp)
 tmp <- FIHyy[(FIHyy$timestamp > ISOdatetime(2010,5,15,0,0,0,tz=tz)) &
              (FIHyy$timestamp <= ISOdatetime(2010,5,16,0,0,0,tz=tz)),]
 gc = compute_stomatal_conductance_jarvis(par=c(200, 0.2, 25)

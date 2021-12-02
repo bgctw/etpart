@@ -70,7 +70,7 @@
 partition_priego <- function(data, ...) {
   lt <- calculate_longterm_leaf(data, ...)
   dfT <- estimate_T_priego_5days(data, lt$chi_o, lt$WUE_o, ...)
-  dfT %>% mutate(E = ET - T)
+  dfT %>% mutate(E = .data$ET - .data$T)
 }
 
 #' Configure parameters of the Priego transpiration partitioning
@@ -122,10 +122,12 @@ priego_config <- function(
 #'    \item VPD: vapor pressure deficit (kPa).
 #'    \item Tair: air temperature (deg C).
 #'    }
-#' @param Z         Z- numeric value defining elevation (km).
+#' @param altitude  numeric value defining elevation (m).
 #' @param C         Empirical coeficient for C3 species.
 #'   (see Wang et al., 2017; Plant Nature)
 #' @param constants physical constants, see \code{\link{etpart_constants}}
+#' @param config configuration (\code{\link{priego_config}})
+#'   with entry C for default of argument C
 #'
 #' @details the following metrics are calculated:
 #'
@@ -137,7 +139,8 @@ priego_config <- function(
 #'
 #'   \deqn{WUE_o <- (390*(1-chi_o)*96)/(1.6*VPD_g)*0.001}
 #'
-#' \code{Tair_g} and \code{VPD_g} are calculated based on the mean value of the growing period.
+#' \code{Tair_g} and \code{VPD_g} are calculated based on the mean value of the
+#' growing period.
 #' The growing period is estimated as those periods over the 85 quantile of GPP.
 #'
 #' @return list with numeric entries:
@@ -153,7 +156,7 @@ priego_config <- function(
 #' Global Change Biology, 11(9), 1424-1439.
 #'
 #' @examples
-#' calculate_longterm_leaf(FIHyy, Z=0.060)
+#' calculate_longterm_leaf(FIHyy, altitude=60)
 #' @export
 #' @importFrom stats quantile
 calculate_longterm_leaf <- function(
@@ -165,12 +168,14 @@ calculate_longterm_leaf <- function(
 ) {
   check_required_cols(data, c("GPP","VPD","Tair"))
   dsagg <- data %>%
-    mutate(VPD_kPa = VPD/10) %>%  # Converting VPD units (hPa -> kPa)
+    mutate(VPD_kPa = .data$VPD/10) %>%  # Converting VPD units (hPa -> kPa)
     # Defining optimal growing period according to quantiles of photosynthesis
-    filter(GPP >  quantile(GPP, probs = 0.85, na.rm=T)) %>%
+    filter(.data$GPP > quantile(.data$GPP, probs = 0.85, na.rm=T)) %>%
     summarize(
-      Tair = mean(Tair, na.rm = TRUE), VPD = mean(VPD_kPa, na.rm = TRUE))
-  logistic_chi_o = 0.0545*(dsagg$Tair-25)-0.58*log(dsagg$VPD)-0.0815*altitude+C
+      Tair = mean(.data$Tair, na.rm = TRUE),
+      VPD = mean(.data$VPD_kPa, na.rm = TRUE))
+  z_km = altitude / 1000
+  logistic_chi_o = 0.0545*(dsagg$Tair-25)-0.58*log(dsagg$VPD)-0.0815*z_km+C
   chi_o <- exp(logistic_chi_o)/(1+exp(logistic_chi_o)) # Longterm effective CiCa
   ## 0.001 to convert umol/mol into umol/mmol
   WUE_o <- (390*(1-chi_o)*96)/(1.6*dsagg$VPD)*0.001
@@ -180,34 +185,34 @@ calculate_longterm_leaf <- function(
 estimate_T_priego_5days <- function(
   data, iday, chi_o, WUE_o, config = priego_config(), ...
 ) {
-  ds5 <- filter(data, between(cumday, iday - 2, iday + 2))
+  ds5 <- filter(data, between(.data$cumday, iday - 2, iday + 2))
   popt <- ds5 %>%
-    # better do inside optim_priego
+    # better do in outermost call
     # mutate(
     #   GPP_sd = ifelse(is.na(.data$GPP_sd), .data$GPP*0.1,.data$GPP_sd),
     #   Q = ifelse(is.na(.data$Q)==TRUE, .data$Rg*2,  .data$Q)
     # ) %>%
     optim_priego(chi_o, WUE_o, config=config, ...)
-  ans <- ds5 %>%
-    filter(cumday == iday) %>%
-    mutate(T = predict_transpiration_opriego(.data, popt$paropt, chi_o, WUE_o, ...))
+  dsi <- ds5 %>% filter(.data$cumday == iday) # cannot use .data in predict_tr.
+  ans <- dsi %>%
+    mutate(T = predict_transpiration_opriego(dsi, popt$paropt, chi_o, WUE_o, ...))
 }
 
 
-#' @importFrom stats median
 #' @importFrom FME Latinhyper
-#' @importFrom  FME modMCMC
+#' @importFrom FME modMCMC
+#' @importFrom stats median
 optim_priego <- function(data, chi_o, WUE_o
      ,config = priego_config(), constants = etpart_constants()
 ){
   dsf = data %>%
     # Rejecting bad data and filtering for daytime data
-    filter(!isnight & GPP>0 & Q>0 & Rg>0) %>%
+    filter(!.data$isnight & .data$GPP>0 & .data$Q>0 & .data$Rg>0) %>%
     mutate(
-      VPD_kPa = VPD/10, # Convert VPD units (hPa -> kPa)
+      VPD_kPa = .data$VPD/10, # Convert VPD units (hPa -> kPa)
       #If PAR is not provided we use SW_in instead as an approximation of PAR
       # *2: conversion factor between W m2 to umol m-2 s-1
-      Q = ifelse(is.na(Q), Rg*2, Q),
+      Q = ifelse(is.na(.data$Q), .data$Rg*2, .data$Q),
       #landa = (3147.5-2.37*(Tair+273.15))*1000 # Latent heat of evaporation [J kg-1]
       GPP_sd = ifelse(is.na(.data$GPP_sd), .data$GPP*0.1, .data$GPP_sd),
     )
@@ -394,6 +399,7 @@ estimate_VPD_eddy <- function(
 #'
 #' @examples
 #'  ## Selecting a single day (e.g. 15-05-2010)
+#' tz <- get_tzone(FIHyy$timestamp)
 #' tmp <- FIHyy[(FIHyy$timestamp > ISOdatetime(2010,5,15,0,0,0,tz=tz)) &
 #'              (FIHyy$timestamp <= ISOdatetime(2010,5,16,0,0,0,tz=tz)),]
 #' gc = compute_stomatal_conductance_jarvis(par=c(200, 0.2, 25)

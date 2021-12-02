@@ -382,7 +382,8 @@ compute_simplifiedDWCI <- function(data, nrecday = 48, na_value = 0) {
   # bootstrap daily correlation by nrep, each column is a sample of all days
   corr_syn <- do.call(cbind, map(1:nboot, function(irep){
     dfg <- dfg %>% mutate(
-      NEE_err = suppressWarnings(rnorm(nrecday, sd = .data$NEE_sd)),
+      #NEE_err = suppressWarnings(rnorm(nrecday, sd = .data$NEE_sd)),
+      NEE_err = suppressWarnings(rnorm(nrecday, sd = .data$GPP_sd)),
       ET_err = suppressWarnings(rnorm(nrecday, sd = .data$ET_sd)),
       GPP_DayCycle = .data$daily_cycle * .data$GPP_mean + .data$NEE_err,
       ET_DayCycle = .data$daily_cycle * .data$ET_mean + .data$ET_err
