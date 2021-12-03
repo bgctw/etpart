@@ -10,8 +10,10 @@ priego_config(
   par_upper = c(a1 = 400, Do = 0.4, To = 30, beta = 1),
   niter = 2000,
   updatecov = 200,
-  ntrydr = 1,
-  burninlength = 600
+  ntrydr = 2,
+  burninlength = 1200,
+  GPPsd_bias2obs = 0.1,
+  wWUE = 0.1
 )
 }
 \arguments{
@@ -32,6 +34,13 @@ to update the MCMC jumps.}
 \item{ntrydr}{maximal number of tries for the delayed rejection procedure}
 
 \item{burninlength}{number of initial iterations to be removed from output.}
+
+\item{GPPsd_bias2obs}{ratio model_variance, i.e. bias to observation variance
+This can be inferred by inspecting prediction-data residuals vs observations.
+The model variance is added to observation variance but relative magnitude
+does not decrease with number fitted points.}
+
+\item{wWUE}{(0..1) weight factor of fitting small carbon cost vs fitting GPP}
 }
 \value{
 a list with above arguments as entries.

@@ -86,6 +86,11 @@ partition_priego <- function(data, ...) {
 #'    to update the MCMC jumps.
 #' @param ntrydr maximal number of tries for the delayed rejection procedure
 #' @param burninlength number of initial iterations to be removed from output.
+#' @param GPPsd_bias2obs ratio model_variance, i.e. bias to observation variance
+#'   This can be inferred by inspecting prediction-data residuals vs observations.
+#'   The model variance is added to observation variance but relative magnitude
+#'   does not decrease with number fitted points.
+#' @param wWUE (0..1) weight factor of fitting small carbon cost vs fitting GPP
 #'
 #' @return a list with above arguments as entries.
 #' @seealso \code{\link{partition_priego}}
@@ -98,8 +103,8 @@ priego_config <- function(
   niter = 2000,
   updatecov = 200,
   ntrydr = 2,
-  burninlength = 600,
-  GPPbias_sd = 0.1,
+  burninlength = 1200,
+  GPPsd_bias2obs = 0.1, # add 10% bias to observation variance
   wWUE = 0.1
 ) {
   list(
@@ -110,7 +115,7 @@ priego_config <- function(
     updatecov = updatecov,
     ntrydr = ntrydr,
     burninlength = burninlength,
-    GPPbias_sd = GPPbias_sd,
+    GPPsd_bias2obs = GPPsd_bias2obs,
     wWUE = wWUE
   )
 }
@@ -188,23 +193,19 @@ calculate_longterm_leaf <- function(
 
 estimate_T_priego <- function(data, is_verbose = TRUE, ...) {
   # loop through each cumday starting from parameter value of last cumday
-  data <- data %>%
-    # -1 to associate midnight to previous day
-    mutate(cumday = ETPart:::get_cumulative_day(timestamp-1))
+  # -1 to associate midnight to previous day
+  data <- data %>% mutate(cumday = get_cumulative_day(.data$timestamp-1))
   cumdays = unique(data$cumday)
   nday = length(cumdays)
   par_iday = NULL
   ansT <- vector("list", nday)
   ansp <- vector("list", nday)
-  iday = 1
-  iday = 6
   if (is_verbose) message(
     'esimating priego parameters for ', nday, " days ", appendLF = FALSE)
   for (iday in 1:nday) {
     cumday = cumdays[iday]
     if (is_verbose) message('.', appendLF = FALSE)
-    res <- ETPart:::estimate_T_priego_5days(
-      data, cumday, par_start = par_iday, ...)
+    res <- estimate_T_priego_5days(data, cumday, par_start = par_iday, ...)
     ansT[[iday]] <- res$data
     ansp[[iday]] <- par_iday <- res$paropt
   }
@@ -212,6 +213,22 @@ estimate_T_priego <- function(data, is_verbose = TRUE, ...) {
   list(data = bind_rows(ansT), paropt = cbind(cumday = cumdays, bind_rows(ansp)))
 }
 
+#' Estiamte parameters for 5 day windows around iday and predict for iday
+#'
+#' @param data data.frame entire dataset
+#' @param iday cumday to process
+#' @param chi_o long-term internal leaf to ambient CO2 concentration
+#' @param WUE_o long-term water use efficiency
+#' @param config configuration passed to \code{optim_priego}
+#' @param par_start starting parameters, may pass from last day for efficiency
+#' @param ...  passed to optim_priego and predict_transpiration_opriego
+#'
+#' @return list with entries
+#' \item{data}{data.frame for given day with added/updated columns
+#'   T (mm/hr), T_sd, GPP_pred, and GPP_pred_sd}
+#' \item{paropt}{numeric vector of mean parameters (not the best estimates)}
+# ' @export
+#' @importFrom purrr array_branch
 estimate_T_priego_5days <- function(
   data, iday, chi_o, WUE_o, config = priego_config(), par_start = NULL, ...
 ) {
@@ -224,10 +241,26 @@ estimate_T_priego_5days <- function(
     # ) %>%
     optim_priego(chi_o, WUE_o, config=config, par_start = par_start, ...)
   dsi <- ds5 %>% filter(.data$cumday == iday) # cannot use .data in predict_tr.
+  #
+  # draw 200 samples and predict T form that compute statistics
+  nSample <- nrow(resopt$parMCMC$pars)
+  if (nSample < 200) stop(
+    "need at least 200 samples. Ajdust niter and burninlength with config arg.")
+  isample = round(seq(1,nSample, length.out=200))
+  psamp = resopt$parMCMC$pars[isample,]
+  preds = map(array_branch(psamp,1), function(p){
+    predict_transpiration_opriego(dsi, p, chi_o, WUE_o, ...)})
+  Ts = do.call(rbind, map(preds, function(pred) pred$T))
+  GPPs = do.call(rbind, map(preds, function(pred) pred$GPP))
+  #plot(density(Ts[,20]))
+  #median(Ts[,48])
   dsT <- dsi %>%
     mutate(
-      T = predict_transpiration_opriego(dsi, resopt$paropt, chi_o, WUE_o, ...))
-  list(data=dsT, paropt = resopt$paropt)
+      T = colMeans(Ts), T_sd = apply(Ts,2,sd),
+      GPP_pred = colMeans(GPPs), GPP_pred_sd = apply(GPPs,2,sd)
+    )
+  #
+  list(data=dsT, paropt=colMeans(resopt$parMCMC$pars))
 }
 
 
@@ -278,33 +311,32 @@ optim_priego <- function(data, chi_o, WUE_o
     ra = ra, VPD_plant = VPD_plant,
     Mden = Mden, GPP_max = GPP_max, Dmax = Dmax,
     GPP_sd_threshold = GPP_sd_threshold,
-    GPPbias_sd = config$GPPbias_sd, wWUE = config$wWUE,
+    GPPsd_bias2obs = config$GPPsd_bias2obs, wWUE = config$wWUE,
     config = NULL # args specified directly, hence not inside cost function
   )
   rss <- min.RSS(par_start)
   # SCE
-  ctrl = list(fnscale = +1, ncomplex=3, tolsteps=10, reltol=1e-2)
-  parSCE <- SCEoptim(
-    min.RSS, par_start, lower=config$par_lower, upper=config$par_upper,
-    control = ctrl)
-  list(paropt=parSCE$par, parSCE=parSCE)
-
+  # ctrl = list(fnscale = +1, ncomplex=3, tolsteps=10, reltol=1e-2)
+  # parSCE <- SCEoptim(
+  #   min.RSS, par_start, lower=config$par_lower, upper=config$par_upper,
+  #   control = ctrl)
+  # list(paropt=parSCE$par, parSCE=parSCE)
+  #
   #MCMC
-  # parMCMC <- try(modMCMC(f = min.RSS
-  #                        ,p = par_start
-  #                        ,niter = config$niter
-  #                        ,updatecov = config$updatecov, ntrydr = config$ntrydr
-  #                        ,lower = config$par_lower , upper = config$par_upper
-  #                        ,burninlength = config$burninlength))
-  # paropt <- parMCMC$bestpar
+  parMCMC <- try(modMCMC(
+    f = min.RSS, p = par_start, niter = config$niter
+    ,updatecov = config$updatecov, ntrydr = config$ntrydr
+    ,lower = config$par_lower , upper = config$par_upper
+    ,burninlength = config$burninlength, verbose=FALSE))
+  paropt <- parMCMC$bestpar
   # out <- summary(parMCMC)
-  # paropt <- c(
+  # paropt <- c( # average parameters??
   #   a1 = out[1,1],
   #   Do = out[1,2],
   #   Topt = out[1,3],
   #   beta = out[1,4]
   # )
-  # ans <- list(paropt = paropt, parMCMC = parMCMC)
+  ans <- list(paropt = paropt, parMCMC = parMCMC)
 }
 
 
@@ -328,7 +360,7 @@ cost_optim_opriego <- function(par, chi_o, WUE_o,
   constants,
   ra, VPD_plant,
   Mden, GPP_max, Dmax, GPP_sd_threshold,
-  GPPbias_sd = config$GPPbias_sd, wWUE = config$wWUE,
+  GPPsd_bias2obs = config$GPPsd_bias2obs, wWUE = config$wWUE,
   config = priego_config()
   ) {
   # note, that VPD and VPD_Plant need to be specified in kPa (not hPa)
@@ -343,8 +375,11 @@ cost_optim_opriego <- function(par, chi_o, WUE_o,
   WaterCost_i <- sum(pred$T, na.rm=T)/sum(pred$GPP, na.rm=T)
   Phi <- WaterCost_i*WUE_o
   nObs = sum(is.finite(GPP))
-  FO <- sum(((pred$GPP-GPP)/(GPP_sd_threshold+GPPbias_sd))^2, na.rm=T)
-  #FO/nObs+Phi # original Opriego
+  # account for model biase
+  # http://www.wutzler.net/reh/twutzr:MCMC#Temperature_for_multiple_DataStreams_3
+  Temp = 1+GPPsd_bias2obs
+  FO <- sum( ((pred$GPP-GPP)/GPP_sd_threshold)^2, na.rm=TRUE)/Temp
+  #FO/nObs+Phi # original priego
   ((FO/nObs)*(1-wWUE) + Phi*wWUE)*nObs
 }
 
@@ -371,7 +406,7 @@ predict_T_GPP_opriego <- function(
   chi = chi_o*(1/(1+beta*VPD_plant^0.5))
   transpiration_mod <- g_bulk$gw_bulk*VPD_plant/Pair*1000 ##<< [mmol H2O m-2 s-1]
   GPP_mod <- g_bulk$gc_bulk*Ca*(1-chi)
-  # T in mm/m2/s GPP in GPP_mod in ?umol CO2 m-2 s-1
+  # T in mmol H2O m-2 s-1 GPP in GPP_mod in ?umol CO2 m-2 s-1
   list(T = transpiration_mod, GPP = GPP_mod)
 }
 
@@ -522,7 +557,8 @@ predict_transpiration_opriego <- function(
     Q=data$Q, Ca=data$Ca, ustar=data$ustar, u=data$u,
     ...
   )
-  pred$T * (18.01528/1e6)*3600  # from mmol m-2 s-2 to mm per hour
+  pred$T = pred$T * (18.01528/1e6)*3600  # from mmol m-2 s-2 to mm per hour
+  pred
 }
 
 

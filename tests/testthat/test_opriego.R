@@ -36,12 +36,8 @@ test_that("cost_optim_opriego",{
   dsf <-  filter(FIHyy, between(
     timestamp, ISOdatetime(2010,5,15,0,0,0,tz=tz), ISOdatetime(2010,5,16,0,0,0,tz=tz)))
   dsf <- filter(dsf, GPP>0 & Q>0 & Rg>0)
+  constants = etpart_constants()
   ra <- ETPart:::compute_aerodynamic_conductance(dsf$u, dsf$ustar)
-  constants = list(
-    Cp = 1003.5, ##<< heat capacity [J kg-1 K-1].
-    R_gas_constant = 0.287058, ##<< [J kg-1 deg K-1].
-    M = 0.0289644 ##<< molar mass, [kg mol-1].
-  )
   dens = ETPart:::calculate_air_density(dsf$Pair, dsf$Tair, constants) #[kg m-3]
   Mden = dens/constants$M ##<< molar air density [mol m-3].
   GPP_max = quantile(dsf$GPP, probs=c(0.90), na.rm=T)
@@ -70,6 +66,7 @@ test_that("cost_optim_opriego",{
   )
   # answer from previous run, might be wrong
   #with Priego original cost function: expect_equal( ans, 5.927, tolerance = 0.001 )
+  expect_equal( ans, 85.83, tolerance = 0.01 )
 })
 
 test_that("optimize_function",{
@@ -85,7 +82,8 @@ test_that("optimize_function",{
   expect_equal(length(ans$paropt), 4)
   # from oscarperezpriego/ETpartitioning:
   ans$paropt
-  expect_equal( ans$paropt[1], c(a1=275), tolerance = 40)
+  #expect_equal( ans$paropt[1], c(a1=275), tolerance = 0.5)
+  expect_equal( ans$paropt[1], c(a1=396), tolerance = 0.5)
 })
 
 .tmp.f <- function(){
@@ -109,7 +107,7 @@ test_that("predict_transpiration_opriego",{
     ISOdatetime(2010,5,19,0,0,0,tz=tz)))
   paropt <- c(a1 = 254, Do = 0.269, Topt = 19.6, beta = 0.555)
   transpiration_mod <- predict_transpiration_opriego(
-    dsf, paropt, chi_o = 0.69, WUE_o= 9.03)
+    dsf, paropt, chi_o = 0.69, WUE_o= 9.03)$T
   # regression to previous value
   expect_equal(mean(transpiration_mod), 0.041, tolerance = 0.001)
 })
@@ -126,20 +124,33 @@ test_that("estimate_T_priego_5days",{
     # -1 to associate midnight to previous day
     mutate(cumday = ETPart:::get_cumulative_day(timestamp-1)) %>%
     filter(cumday <= 6)
-  cfg = priego_config(niter = 500, burninlength = 400, updatecov = 100)
-  cfg = priego_config(wWUE=0.1)
+  cfg = priego_config(niter = 2000, burninlength = 1000, updatecov = 250)
   dfans <- map_dfr(unique(data$cumday), function(iday){
     ETPart:::estimate_T_priego_5days(
       data, iday, lt$chi_o, lt$WUE_o, config = cfg)$data
   })
   #expect_equal(nrow(dfans),nrow(data))
-  expect_equal(select(dfans, -T), data)
+  expect_equal(select(dfans, -c(T, T_sd, GPP_pred, GPP_pred_sd)), data)
   #plot(T ~ ET, data=dfans, xlab="ET (mm/hour)"); abline(0,1)
   # regression to previous value: same magnitude
   #expect_equal(coef(lm(T~ET,data=dfans))["ET"], c(ET=0.5), tolerance= 0.1)
+  .tmp.f <- function(){
+    plot(T ~ timestamp, dfans, type="l")
+    lines(T+1.96*T_sd ~ timestamp, dfans, type="l", col="gray")
+    lines(T-1.96*T_sd ~ timestamp, dfans, type="l", col="gray")
+    plot(GPP_pred ~ GPP, dfans); abline(0,1)
+    plot((GPP_pred - GPP) ~ GPP_sd, dfans)
+    # bias ratio
+    s2m = (dfans$GPP_pred - dfans$GPP)^2 - dfans$GPP_sd^2
+    plot(density(s2m, na.rm = TRUE))
+    mean(s2m, na.rm = TRUE)
+    mean(s2m, na.rm = TRUE) / mean(dfans$GPP_sd^2, na.rm = TRUE)
+    #0.08 # add 8% bias to observation error
+  }
 })
 
 test_that("estimate_T_priego",{
+  skip_on_cran()
   #tmp <-  FIHyy[ FIHyy$TIMESTAMP_START>  201105150000,]
   #tmp <-  tmp[tmp$TIMESTAMP_START<  201105160000,]
   tz = attr(FIHyy$timestamp, "tzone")
@@ -150,7 +161,8 @@ test_that("estimate_T_priego",{
     data, chi_o = lt$chi_o, WUE_o = lt$WUE_o, is_verbose = FALSE)
   dfans <- res$data
   #expect_equal(nrow(dfans),nrow(data))
-  expect_equal(select(dfans, -c(T,cumday)), data)
+  expect_equal(select(dfans, -c(
+    .data$T,.data$T_sd, .data$GPP_pred, .data$GPP_pred_sd, .data$cumday)), data)
   #plot(T ~ ET, data=dfans, xlab="ET (mm/hour)"); abline(0,1)
   #plot(beta ~ cumday, res$paropt)
   # regression to previous value: same magnitude
@@ -161,16 +173,19 @@ test_that("estimate_T_priego",{
 
 .tmp.f <- function(){
   # entire FIHyy dataset
+  lt <- calculate_longterm_leaf(FIHyy, altitude = 100)
   data <- FIHyy %>%
     #filter(NIGHT == 0) %>%  # filter only during fitting
     # -1 to associate midnight to previous day
-    mutate(cumday = ETPart:::get_cumulative_day(timestamp-1)) %>%
-    filter(between(cumday, 150, 300))
-  lt <- calculate_longterm_leaf(data, altitude = 100)
-  resopt <- ETPart:::estimate_T_priego(data, chi_o = lt$chi_o, WUE_o = lt$WUE_o)
+    mutate(yday = ETPart:::get_cumulative_day(timestamp-1)) %>%
+    filter(between(yday, 250, 260))
+  res <- ETPart:::estimate_T_priego(data, chi_o = lt$chi_o, WUE_o = lt$WUE_o)
   dfT <- resopt$data
   plot(T ~ ET, data=dfT, xlab="ET (mm/hour)"); abline(0,1)
-  plot(beta ~ cumday, data=resopt$dfpopt)
+  plot(beta ~ cumday, data=resopt$paropt)
+  plot(T ~ ET, data=filter(dfT, between(cumday,4,7)), xlab="ET (mm/hour)"); abline(0,1)
+  plot(T ~ ET, data=filter(dfT, between(cumday,1,3)), xlab="ET (mm/hour)"); abline(0,1)
+  plot(T ~ timestamp, data=dfT, type = "l")
 }
 
 

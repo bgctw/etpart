@@ -50,7 +50,8 @@ WUE_o:
 
 \deqn{WUE_o <- (390*(1-chi_o)*96)/(1.6*VPD_g)*0.001}
 
-\code{Tair_g} and \code{VPD_g} are calculated based on the mean value of the growing period.
+\code{Tair_g} and \code{VPD_g} are calculated based on the mean value of the
+growing period.
 The growing period is estimated as those periods over the 85 quantile of GPP.
 }
 \examples{
