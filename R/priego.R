@@ -69,7 +69,7 @@
 #' @export
 partition_priego <- function(data, ...) {
   lt <- calculate_longterm_leaf(data, ...)
-  dfT <- estimate_T_priego_5days(data, lt$chi_o, lt$WUE_o, ...)
+  dfT <- estimate_T_priego(data, lt$chi_o, lt$WUE_o, ...)$data
   dfT %>% mutate(E = .data$ET - .data$T)
 }
 
@@ -97,8 +97,10 @@ priego_config <- function(
   #niter = 20000,
   niter = 2000,
   updatecov = 200,
-  ntrydr = 1,
-  burninlength = 600
+  ntrydr = 2,
+  burninlength = 600,
+  GPPbias_sd = 0.1,
+  wWUE = 0.1
 ) {
   list(
     C = C,
@@ -107,7 +109,9 @@ priego_config <- function(
     niter = niter,
     updatecov = updatecov,
     ntrydr = ntrydr,
-    burninlength = burninlength
+    burninlength = burninlength,
+    GPPbias_sd = GPPbias_sd,
+    wWUE = wWUE
   )
 }
 
@@ -182,20 +186,48 @@ calculate_longterm_leaf <- function(
   list(chi_o = chi_o, WUE_o = WUE_o)
 }
 
+estimate_T_priego <- function(data, is_verbose = TRUE, ...) {
+  # loop through each cumday starting from parameter value of last cumday
+  data <- data %>%
+    # -1 to associate midnight to previous day
+    mutate(cumday = ETPart:::get_cumulative_day(timestamp-1))
+  cumdays = unique(data$cumday)
+  nday = length(cumdays)
+  par_iday = NULL
+  ansT <- vector("list", nday)
+  ansp <- vector("list", nday)
+  iday = 1
+  iday = 6
+  if (is_verbose) message(
+    'esimating priego parameters for ', nday, " days ", appendLF = FALSE)
+  for (iday in 1:nday) {
+    cumday = cumdays[iday]
+    if (is_verbose) message('.', appendLF = FALSE)
+    res <- ETPart:::estimate_T_priego_5days(
+      data, cumday, par_start = par_iday, ...)
+    ansT[[iday]] <- res$data
+    ansp[[iday]] <- par_iday <- res$paropt
+  }
+  if (is_verbose) message(appendLF = TRUE)
+  list(data = bind_rows(ansT), paropt = cbind(cumday = cumdays, bind_rows(ansp)))
+}
+
 estimate_T_priego_5days <- function(
-  data, iday, chi_o, WUE_o, config = priego_config(), ...
+  data, iday, chi_o, WUE_o, config = priego_config(), par_start = NULL, ...
 ) {
   ds5 <- filter(data, between(.data$cumday, iday - 2, iday + 2))
-  popt <- ds5 %>%
+  resopt <- ds5 %>%
     # better do in outermost call
     # mutate(
     #   GPP_sd = ifelse(is.na(.data$GPP_sd), .data$GPP*0.1,.data$GPP_sd),
     #   Q = ifelse(is.na(.data$Q)==TRUE, .data$Rg*2,  .data$Q)
     # ) %>%
-    optim_priego(chi_o, WUE_o, config=config, ...)
+    optim_priego(chi_o, WUE_o, config=config, par_start = par_start, ...)
   dsi <- ds5 %>% filter(.data$cumday == iday) # cannot use .data in predict_tr.
-  ans <- dsi %>%
-    mutate(T = predict_transpiration_opriego(dsi, popt$paropt, chi_o, WUE_o, ...))
+  dsT <- dsi %>%
+    mutate(
+      T = predict_transpiration_opriego(dsi, resopt$paropt, chi_o, WUE_o, ...))
+  list(data=dsT, paropt = resopt$paropt)
 }
 
 
@@ -204,7 +236,10 @@ estimate_T_priego_5days <- function(
 #' @importFrom stats median
 optim_priego <- function(data, chi_o, WUE_o
      ,config = priego_config(), constants = etpart_constants()
+     ,par_start = NULL
 ){
+  if (is.null(par_start)) par_start = Latinhyper(
+    cbind(config$par_lower,config$par_upper),num = 1)[1,]
   dsf = data %>%
     # Rejecting bad data and filtering for daytime data
     filter(!.data$isnight & .data$GPP>0 & .data$Q>0 & .data$Rg>0) %>%
@@ -216,7 +251,7 @@ optim_priego <- function(data, chi_o, WUE_o
       #landa = (3147.5-2.37*(Tair+273.15))*1000 # Latent heat of evaporation [J kg-1]
       GPP_sd = ifelse(is.na(.data$GPP_sd), .data$GPP*0.1, .data$GPP_sd),
     )
-  pars <- Latinhyper(cbind(config$par_lower,config$par_upper),num = 1)
+  pars <- par_start
   # try computing all that does not depend on parameters once outside cost
   ra <- compute_aerodynamic_conductance(dsf$u, dsf$ustar)
   dens = calculate_air_density(dsf$Pair, dsf$Tair, constants) # [kg m-3].
@@ -242,24 +277,36 @@ optim_priego <- function(data, chi_o, WUE_o
     constants = NULL, # actually never used because of precomputations
     ra = ra, VPD_plant = VPD_plant,
     Mden = Mden, GPP_max = GPP_max, Dmax = Dmax,
-    GPP_sd_threshold = GPP_sd_threshold
+    GPP_sd_threshold = GPP_sd_threshold,
+    GPPbias_sd = config$GPPbias_sd, wWUE = config$wWUE,
+    config = NULL # args specified directly, hence not inside cost function
   )
-  rss <- min.RSS(pars)
-  parMCMC <- try(modMCMC(f = min.RSS
-                         ,p = as.numeric(pars)
-                         ,niter = config$niter
-                         ,updatecov = config$updatecov, ntrydr = config$ntrydr
-                         ,lower = config$par_lower , upper = config$par_upper
-                         ,burninlength = config$burninlength))
-  out <- summary(parMCMC)
-  paropt <- c(
-    a1 = out[1,1],
-    Do = out[1,2],
-    Topt = out[1,3],
-    beta = out[1,4]
-  )
-  list(paropt = paropt, parMCMC = parMCMC)
+  rss <- min.RSS(par_start)
+  # SCE
+  ctrl = list(fnscale = +1, ncomplex=3, tolsteps=10, reltol=1e-2)
+  parSCE <- SCEoptim(
+    min.RSS, par_start, lower=config$par_lower, upper=config$par_upper,
+    control = ctrl)
+  list(paropt=parSCE$par, parSCE=parSCE)
+
+  #MCMC
+  # parMCMC <- try(modMCMC(f = min.RSS
+  #                        ,p = par_start
+  #                        ,niter = config$niter
+  #                        ,updatecov = config$updatecov, ntrydr = config$ntrydr
+  #                        ,lower = config$par_lower , upper = config$par_upper
+  #                        ,burninlength = config$burninlength))
+  # paropt <- parMCMC$bestpar
+  # out <- summary(parMCMC)
+  # paropt <- c(
+  #   a1 = out[1,1],
+  #   Do = out[1,2],
+  #   Topt = out[1,3],
+  #   beta = out[1,4]
+  # )
+  # ans <- list(paropt = paropt, parMCMC = parMCMC)
 }
+
 
 calculate_air_density <- function(Pair, Tair, constants=etpart_constants()) {
   dens = Pair/(constants$R_gas_constant*(Tair+273.15))
@@ -280,7 +327,9 @@ cost_optim_opriego <- function(par, chi_o, WUE_o,
   # need supply the arguments below for performance, see optim_priego
   constants,
   ra, VPD_plant,
-  Mden, GPP_max, Dmax, GPP_sd_threshold
+  Mden, GPP_max, Dmax, GPP_sd_threshold,
+  GPPbias_sd = config$GPPbias_sd, wWUE = config$wWUE,
+  config = priego_config()
   ) {
   # note, that VPD and VPD_Plant need to be specified in kPa (not hPa)
   pred <- predict_T_GPP_opriego(
@@ -293,8 +342,10 @@ cost_optim_opriego <- function(par, chi_o, WUE_o,
   )
   WaterCost_i <- sum(pred$T, na.rm=T)/sum(pred$GPP, na.rm=T)
   Phi <- WaterCost_i*WUE_o
-  FO <- sum(((pred$GPP-GPP)/GPP_sd_threshold)^2, na.rm=T)/length(GPP)
-  FO+Phi
+  nObs = sum(is.finite(GPP))
+  FO <- sum(((pred$GPP-GPP)/(GPP_sd_threshold+GPPbias_sd))^2, na.rm=T)
+  #FO/nObs+Phi # original Opriego
+  ((FO/nObs)*(1-wWUE) + Phi*wWUE)*nObs
 }
 
 predict_T_GPP_opriego <- function(
