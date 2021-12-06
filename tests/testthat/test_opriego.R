@@ -88,7 +88,9 @@ test_that("optimize_function",{
 
 .tmp.f <- function(){
   cfg = priego_config(
-    burninlength = 1000, niter = 11000, updatecov = 250, GPPbias_sd = 0.0)
+    burninlength = 1200, niter = 200, updatecov = 250, GPPs2_bias2obs = 0.0)
+  cfg = priego_config(
+    burninlength = 500, niter = 8000, updatecov = 250, GPPs2_bias2obs = 0.05)
   ans <-  ETPart:::optim_priego(dsf, chi_o = 0.69, WUE_o= 9.03, config = cfg)
   plot(ans$parMCMC)
   pairs(ans$parMCMC)
@@ -125,6 +127,7 @@ test_that("estimate_T_priego_5days",{
     mutate(cumday = ETPart:::get_cumulative_day(timestamp-1)) %>%
     filter(cumday <= 6)
   cfg = priego_config(niter = 2000, burninlength = 1000, updatecov = 250)
+  cfg = priego_config(GPPs2_bias2obs = 0.08)
   dfans <- map_dfr(unique(data$cumday), function(iday){
     ETPart:::estimate_T_priego_5days(
       data, iday, lt$chi_o, lt$WUE_o, config = cfg)$data
@@ -142,7 +145,7 @@ test_that("estimate_T_priego_5days",{
     plot((GPP_pred - GPP) ~ GPP_sd, dfans)
     # bias ratio
     s2m = (dfans$GPP_pred - dfans$GPP)^2 - dfans$GPP_sd^2
-    plot(density(s2m, na.rm = TRUE))
+    #plot(density(s2m, na.rm = TRUE))
     mean(s2m, na.rm = TRUE)
     mean(s2m, na.rm = TRUE) / mean(dfans$GPP_sd^2, na.rm = TRUE)
     #0.08 # add 8% bias to observation error

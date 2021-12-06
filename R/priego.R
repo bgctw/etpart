@@ -86,7 +86,7 @@ partition_priego <- function(data, ...) {
 #'    to update the MCMC jumps.
 #' @param ntrydr maximal number of tries for the delayed rejection procedure
 #' @param burninlength number of initial iterations to be removed from output.
-#' @param GPPsd_bias2obs ratio model_variance, i.e. bias to observation variance
+#' @param GPPs2_bias2obs ratio model_variance, i.e. bias to observation variance
 #'   This can be inferred by inspecting prediction-data residuals vs observations.
 #'   The model variance is added to observation variance but relative magnitude
 #'   does not decrease with number fitted points.
@@ -104,7 +104,7 @@ priego_config <- function(
   updatecov = 200,
   ntrydr = 2,
   burninlength = 1200,
-  GPPsd_bias2obs = 0.1, # add 10% bias to observation variance
+  GPPs2_bias2obs = 0.08, # add 10% bias to observation variance
   wWUE = 0.1
 ) {
   list(
@@ -115,7 +115,7 @@ priego_config <- function(
     updatecov = updatecov,
     ntrydr = ntrydr,
     burninlength = burninlength,
-    GPPsd_bias2obs = GPPsd_bias2obs,
+    GPPs2_bias2obs = GPPs2_bias2obs,
     wWUE = wWUE
   )
 }
@@ -311,7 +311,7 @@ optim_priego <- function(data, chi_o, WUE_o
     ra = ra, VPD_plant = VPD_plant,
     Mden = Mden, GPP_max = GPP_max, Dmax = Dmax,
     GPP_sd_threshold = GPP_sd_threshold,
-    GPPsd_bias2obs = config$GPPsd_bias2obs, wWUE = config$wWUE,
+    GPPs2_bias2obs = config$GPPs2_bias2obs, wWUE = config$wWUE,
     config = NULL # args specified directly, hence not inside cost function
   )
   rss <- min.RSS(par_start)
@@ -360,7 +360,7 @@ cost_optim_opriego <- function(par, chi_o, WUE_o,
   constants,
   ra, VPD_plant,
   Mden, GPP_max, Dmax, GPP_sd_threshold,
-  GPPsd_bias2obs = config$GPPsd_bias2obs, wWUE = config$wWUE,
+  GPPs2_bias2obs = config$GPPs2_bias2obs, wWUE = config$wWUE,
   config = priego_config()
   ) {
   # note, that VPD and VPD_Plant need to be specified in kPa (not hPa)
@@ -377,7 +377,7 @@ cost_optim_opriego <- function(par, chi_o, WUE_o,
   nObs = sum(is.finite(GPP))
   # account for model biase
   # http://www.wutzler.net/reh/twutzr:MCMC#Temperature_for_multiple_DataStreams_3
-  Temp = 1+GPPsd_bias2obs
+  Temp = 1 + nObs * GPPs2_bias2obs
   FO <- sum( ((pred$GPP-GPP)/GPP_sd_threshold)^2, na.rm=TRUE)/Temp
   #FO/nObs+Phi # original priego
   ((FO/nObs)*(1-wWUE) + Phi*wWUE)*nObs
